@@ -1,7 +1,7 @@
 'use strict';
 /* 校了さん：持ち曲は固定、練習タイテとセトリを各3スロットに自動保存。 */
 (() => {
-  const KEY='koryosan.app.v1';
+  const PREFS_KEY='koryosan.preferences.v5';
   const $app=document.getElementById('app');
   const $modal=document.getElementById('modal-root');
   const $toast=document.getElementById('toast');
@@ -25,6 +25,7 @@
     tasks:'<path d="M3 6l2.5 2.5L9 4M12 6h9M3 15l2.5 2.5L9 13M12 15h9"/>',
     eye:'<path d="M2 12s3.7-6 10-6 10 6 10 6-3.7 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
     eyeOff:'<path d="M3 3l18 18M10.6 6.2A11 11 0 0 1 12 6c6.3 0 10 6 10 6a13 13 0 0 1-3.2 3.7M6 6.5A13 13 0 0 0 2 12s3.7 6 10 6c1.7 0 3.3-.4 4.6-1.1"/>',
+    logout:'<path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M16 17l5-5-5-5M21 12H9"/>',
     copy:'<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'
   };
   const ico=(name)=>`<svg viewBox="0 0 24 24" class="icon" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[name]}</svg>`;
@@ -96,7 +97,8 @@
             cells[row]=values.slice(0,headers.length).map(value=>typeof value==='string'?value.slice(0,5000):'');
           }
         }
-        detailEdits[songId]={columns:headers,cells};
+        const columnIds=Array.isArray(entry.columnIds)&&entry.columnIds.length===headers.length&&entry.columnIds.every(v=>typeof v==='string'&&/^[A-Za-z0-9_-]+$/.test(v)) ? entry.columnIds.slice() : headers.map((_,i)=>`memo${i+1}`);
+        detailEdits[songId]={columns:headers,columnIds,cells};
       }
     }
     // v3で3列目に追記済みの内容と、2列目に置かれていた固定コメントを両方残す。
@@ -118,10 +120,59 @@
       setlistSlots:defaults.setlistSlots.map((s,i)=>validSlot(raw.setlistSlots?.[i],s,false)),
       practiceSlots:defaults.practiceSlots.map((s,i)=>validSlot(raw.practiceSlots?.[i],s,true))};
   }
-  function read(){try{const raw=localStorage.getItem(KEY);return raw?validate(JSON.parse(raw)):makeState();}catch(e){console.warn(e);return makeState();}}
+  function read(){
+    // 認証前の公開用データや端末の旧版保存データを復元しない。
+    const data=validate(window.__KORYO_INITIAL_STATE||makeState());
+    try {const prefs=JSON.parse(localStorage.getItem(PREFS_KEY)||'{}');
+      data.sort=['capo','name','duration'].includes(prefs.sort)?prefs.sort:'capo';
+      data.taskSort=prefs.taskSort==='member'?'member':'deadline';data.showCompleted=prefs.showCompleted!==false;
+      data.activeSetlist=[0,1,2].includes(prefs.activeSetlist)?prefs.activeSetlist:0;
+      data.activePractice=[0,1,2].includes(prefs.activePractice)?prefs.activePractice:0;
+    }catch(_){}
+    // 旧版の保存データは自動削除しない。バックアップ後にユーザーの明示操作で削除。
+    return data;
+  }
   let state=read(), page='tasks', detailSong=null, modalOpen=false, taskEditingId=null, dragging=null;
   const scrollPos={task:0,song:0,detail:0,detailX:0,practiceDraft:0,practiceLibrary:0,setDraft:0,setLibrary:0};
-  function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){console.error(e);toast('保存できません。Safariのストレージ設定を確認してください');}}
+  let lastPublished=clone(state), pendingRemote=null;
+  function persistPrefs(){
+    try{localStorage.setItem(PREFS_KEY,JSON.stringify({sort:state.sort,taskSort:state.taskSort,showCompleted:state.showCompleted,activeSetlist:state.activeSetlist,activePractice:state.activePractice}));}
+    catch(error){console.warn('設定保存:',error);}
+  }
+  function save(){
+    // JSON丸ごと上書きしない。差分を小さなDBノード単位で更新する。
+    const next=clone(state),prior=lastPublished;lastPublished=next;
+    persistPrefs();
+    void window.KoryoCloud.publish(prior,next).catch(error=>{console.error('共有保存:',error);toast('共有保存に失敗しました。再読み込みして状態を確認してください');});
+  }
+  function syncError(message){toast(message);}
+  function hasActiveEditor(){const active=document.activeElement;return modalOpen || !!(active && ['INPUT','TEXTAREA','SELECT'].includes(active.tagName));}
+  function receiveRemote(branch,model){
+    if(hasActiveEditor()) { pendingRemote={...(pendingRemote||{}),[branch]:model};return; }
+    applyRemote(branch,model);
+  }
+  function applyRemote(branch,model){
+    if(branch==='songs'||branch==='setlistExtras'||branch==='practicePresets'||branch==='songSections'){
+      songById.clear();for(const s of [...KORYOSAN_SONGS,...KORYOSAN_EXTRA])songById.set(s.id,s);
+      practiceById.clear();for(const p of KORYOSAN_PRACTICE)practiceById.set(p.id,p);
+    }
+    if(branch==='tasks')state.tasks=validate({...state,tasks:model.state.tasks}).tasks;
+    if(branch==='songNotes')state.detailEdits=validate({...state,detailEdits:model.state.detailEdits}).detailEdits;
+    if(branch==='setlistSlots')state.setlistSlots=validate({...state,setlistSlots:model.state.setlistSlots}).setlistSlots;
+    if(branch==='practiceSlots')state.practiceSlots=validate({...state,practiceSlots:model.state.practiceSlots}).practiceSlots;
+    // 遠隔の更新は次回差分の基準にも反映し、他人の値を誤って再送信しない。
+    lastPublished=clone(state);
+    const affectsCurrent =
+      (branch==='tasks' && page==='tasks') ||
+      (branch==='songNotes' && page==='detail') ||
+      (branch==='practiceSlots' && page==='practice') ||
+      (branch==='setlistSlots' && page==='setlist') ||
+      (['songs','songSections','setlistExtras','practicePresets'].includes(branch) && ['songs','detail','practice','setlist'].includes(page));
+    // 別メンバーがタスクを更新しても、メトロノームを勝手に停止させない。
+    if(!modalOpen && affectsCurrent)render();
+  }
+  function flushRemote(){if(hasActiveEditor()||!pendingRemote)return;const ready=pendingRemote;pendingRemote=null;for(const [branch,model] of Object.entries(ready))applyRemote(branch,model);}
+  window.KoryoApp={receiveRemote,syncError};
   let toastTimer;
   function toast(message){$toast.textContent=message;$toast.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$toast.classList.remove('show'),3000);}
   function slot(kind){return kind==='setlist'?state.setlistSlots[state.activeSetlist]:state.practiceSlots[state.activePractice];}
@@ -179,7 +230,7 @@
       if(!Object.prototype.hasOwnProperty.call(values,0)&&row.note)values[0]=row.note;
       cells[i]=values;
     }
-    return {columns:[...saved.columns],cells};
+    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells};
   }
   function detailsPage(){
     const song=songById.get(detailSong);if(!song)return songsPage();
@@ -234,6 +285,7 @@
     if(data.columns.length>=6){toast('最大6列です');return;}
     const n=data.columns.length+1;
     data.columns.unshift(`追記メモ ${n}`);
+    data.columnIds.unshift(`memo_${guid().replace(/[^a-zA-Z0-9_-]/g,'')}`);
     for(const row of Object.values(data.cells))row.unshift('');
     state.detailEdits[detailSong]=data;save();render();
     const wrap=document.querySelector('.detail-lyrics-wrap');if(wrap)wrap.scrollLeft=0;
@@ -346,12 +398,12 @@
     }
   }
   function moveEntry(kind,id,targetId){const list=slot(kind).entries;const from=list.findIndex(e=>e.id===id),to=list.findIndex(e=>e.id===targetId);if(from<0||to<0||from===to)return;const [entry]=list.splice(from,1);list.splice(to,0,entry);save();render();}
-  function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細の追記メモ、3つの練習タイテ、3つのセトリ、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元すると現在の6スロットの内容が置き換わります。端末を変更する前やアプリを削除する前に、必ずバックアップを保存してください。</p></section></div>`;}
-  function closeData(){modalOpen=false;$modal.innerHTML='';}
-  function downloadBackup(){const obj={app:'Koryosan_PWA',version:4,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
+  function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細の追記メモ、3つの練習タイテ、3つのセトリ、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
+  function closeData(){modalOpen=false;$modal.innerHTML='';setTimeout(flushRemote,0);}
+  function downloadBackup(){const obj={app:'Koryosan_PWA',version:5,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
   async function readBackup(file){if(!file)return;if(file.size>8*1024*1024){toast('8MB以下のファイルを指定してください');return;}try{
       const obj=JSON.parse(await file.text());if(obj.app!=='Koryosan_PWA'||!obj.state)throw Error('校了さん用のバックアップを選んでください');
-      const nextState=validate(obj.state);if(!confirm('現在のタスク・セトリ・練習タイテ・曲別追記メモをバックアップの内容で置き換えますか？'))return;
+      const nextState=validate(obj.state);if(!confirm('このバックアップの内容を3人の共有データベースに反映します。既存の項目を上書き・削除する可能性があります。実行しますか？'))return;
       if(obj.metronome)window.KoryoMetronome?.restore(obj.metronome);
       state=nextState;save();closeData();render();toast('バックアップを読み込みました');
     }catch(e){console.error(e);alert('読み込めませんでした：'+e.message);}}
@@ -404,6 +456,8 @@
     if(what==='data'){openData();return;}
     if(what==='close-dialog'){closeData();return;}
     if(what==='overlay'){closeData();return;}
+    if(what==='logout'){if(confirm('ログアウトしますか？'))void window.KoryoCloud.logout();return;}
+    if(what==='clear-legacy'){if(confirm('旧版の端末内保存データを削除しますか？ まだFirebaseに移していないタスクやメモがある場合は、先に旧版のバックアップを確認してください。')){try{localStorage.removeItem('koryosan.app.v1');toast('旧版の端末内保存データを削除しました');}catch(e){toast('削除できませんでした');}}return;}
     if(what==='export-data'){downloadBackup();return;}
     if(what==='import-data'){document.getElementById('backup-input')?.click();return;}
   }
@@ -425,7 +479,7 @@
     if(el.id==='planned-minutes'){el.value=slot('setlist').minutes;return;}
     if(el.id==='backup-input'){void readBackup(el.files?.[0]);el.value='';}
   });
-  document.addEventListener('focusout',e=>{if(e.target.id==='planned-minutes')e.target.value=slot('setlist').minutes;});
+  document.addEventListener('focusout',e=>{if(e.target.id==='planned-minutes')e.target.value=slot('setlist').minutes;setTimeout(flushRemote,0);});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen)closeData();if(e.key==='Enter'&&e.target.id==='planned-minutes')e.target.blur();});
   // Drag handles work with touch and mouse; prevents accidental scroll only during the drag.
   document.addEventListener('pointerdown',e=>{

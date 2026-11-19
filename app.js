@@ -23,6 +23,8 @@
     plus:'<path d="M12 5v14M5 12h14"/>',
     chevron:'<path d="m9 6 6 6-6 6"/>',
     tasks:'<path d="M3 6l2.5 2.5L9 4M12 6h9M3 15l2.5 2.5L9 13M12 15h9"/>',
+    eye:'<path d="M2 12s3.7-6 10-6 10 6 10 6-3.7 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff:'<path d="M3 3l18 18M10.6 6.2A11 11 0 0 1 12 6c6.3 0 10 6 10 6a13 13 0 0 1-3.2 3.7M6 6.5A13 13 0 0 0 2 12s3.7 6 10 6c1.7 0 3.3-.4 4.6-1.1"/>',
     copy:'<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'
   };
   const ico=(name)=>`<svg viewBox="0 0 24 24" class="icon" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[name]}</svg>`;
@@ -30,6 +32,10 @@
   const clone=o=>JSON.parse(JSON.stringify(o));
   const guid=()=>globalThis.crypto?.randomUUID?.()||'id-'+Date.now()+'-'+Math.random().toString(36).slice(2);
   const time=s=>`${s<0?'−':''}${Math.floor(Math.abs(s)/60)}:${String(Math.abs(s)%60).padStart(2,'0')}`;
+  const pad=n=>String(n).padStart(2,'0');
+  const minutesOf=clock=>{const m=/^(\d{2}):(\d{2})$/.exec(clock||'');if(!m)return null;const h=Number(m[1]),n=Number(m[2]);return h<24&&n<60?h*60+n:null;};
+  const clockOf=mins=>`${pad(Math.floor(((mins%1440)+1440)%1440/60))}:${pad(((mins%1440)+1440)%1440%60)}`;
+  const practiceSpan=s=>{const start=minutesOf(s.startTime),end=minutesOf(s.endTime);if(start===null||end===null)return s.minutes;return (end-start+1440)%1440;};
   const capoText=s=>s.capo==null?'—':String(s.capo);
   const tuneOrder=t=>{const i=KORYOSAN_TUNINGS.indexOf(t);return i<0?999:i;};
   const naturalCompare=(a,b)=>a.localeCompare(b,'ja',{numeric:true,sensitivity:'base'});
@@ -39,8 +45,8 @@
   const songById=new Map([...KORYOSAN_SONGS,...KORYOSAN_EXTRA].map(song=>[song.id,song]));
   const practiceById=new Map(KORYOSAN_PRACTICE.map(item=>[item.id,item]));
   const newSetlist=i=>({name:`セトリ ${i+1}`,minutes:30,entries:[]});
-  const newPractice=i=>({name:`練習 ${i+1}`,minutes:120,entries:[]});
-  const makeState=()=>({version:3,detailEdits:{},sort:'capo',activeSetlist:0,activePractice:0,tasks:[],
+  const newPractice=i=>({name:`練習 ${i+1}`,minutes:120,startTime:'18:00',endTime:'20:00',entries:[]});
+  const makeState=()=>({version:4,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,activeSetlist:0,activePractice:0,tasks:[],
     setlistSlots:Array.from({length:SLOTS},(_,i)=>newSetlist(i)),
     practiceSlots:Array.from({length:SLOTS},(_,i)=>newPractice(i))});
   function validate(raw){
@@ -60,7 +66,10 @@
         }
         return songById.has(entry?.songId)?{id,songId:entry.songId}:null;
       }).filter(Boolean):[];
-      return {name,minutes,entries};
+      if(!isPractice)return {name,minutes,entries};
+      const startTime=minutesOf(s.startTime)!==null?s.startTime:fallback.startTime;
+      const endTime=minutesOf(s.endTime)!==null?s.endTime:clockOf(minutesOf(startTime)+minutes);
+      return {name,minutes,startTime,endTime,entries};
     };
     const tasks=Array.isArray(raw.tasks) ? raw.tasks.slice(0,2000).filter(t=>t&&typeof t==='object').map(t=>({
       id:typeof t.id==='string'?t.id.slice(0,100):guid(),
@@ -90,7 +99,20 @@
         detailEdits[songId]={columns:headers,cells};
       }
     }
-    return {version:3,detailEdits,tasks,sort:['capo','name','duration'].includes(raw.sort)?raw.sort:'capo',
+    // v3で3列目に追記済みの内容と、2列目に置かれていた固定コメントを両方残す。
+    if((raw.version??3)<4){
+      for(const [songId,entry] of Object.entries(detailEdits)){
+        const sections=KORYOSAN_DETAILS?.[songId]||[];
+        for(const [index,section] of sections.entries()){
+          if(!section.note)continue;
+          const row=entry.cells[index]||[];
+          const previous=typeof row[0]==='string'?row[0]:'';
+          row[0]=previous.includes(section.note)?previous:section.note+(previous?'\n\n'+previous:'');
+          entry.cells[index]=row;
+        }
+      }
+    }
+    return {version:4,detailEdits,tasks,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,sort:['capo','name','duration'].includes(raw.sort)?raw.sort:'capo',
       activeSetlist:[0,1,2].includes(raw.activeSetlist)?raw.activeSetlist:0,
       activePractice:[0,1,2].includes(raw.activePractice)?raw.activePractice:0,
       setlistSlots:defaults.setlistSlots.map((s,i)=>validSlot(raw.setlistSlots?.[i],s,false)),
@@ -111,59 +133,70 @@
   function restoreScroll(){Object.keys(scrollPos).forEach(key=>{const el=document.querySelector(`[data-scroll="${key}"]`);if(el)el.scrollTop=scrollPos[key];});
     const table=document.querySelector('.detail-lyrics-wrap');if(table)table.scrollLeft=scrollPos.detailX;
   }
-  function slotButtons(kind){const arr=kind==='practice'?state.practiceSlots:state.setlistSlots;const active=kind==='practice'?state.activePractice:state.activeSetlist;
-    return `<div class="slot-tabs" role="group" aria-label="${kind==='practice'?'練習タイテ':'セトリ'}のスロット選択">${arr.map((s,i)=>`<button class="slot-button ${i===active?'active':''}" aria-pressed="${i===active}" data-action="slot" data-kind="${kind}" data-index="${i}" title="${esc(s.name||`スロット ${i+1}`)}" aria-label="${esc(s.name||`スロット ${i+1}`)}：スロット${i+1}"><span>${i+1}</span><small>${esc(s.name||`スロット ${i+1}`)}</small></button>`).join('')}</div>`;
+  function slotButtons(kind){
+    const arr=kind==='practice'?state.practiceSlots:state.setlistSlots,active=kind==='practice'?state.activePractice:state.activeSetlist;
+    return `<div class="header-slotbar" role="group" aria-label="${kind==='practice'?'練習タイテ':'セトリ'}のスロット">${arr.map((s,i)=>`<div class="header-slot ${i===active?'active':''}">
+      <button type="button" class="slot-button" data-action="slot" data-kind="${kind}" data-index="${i}" aria-pressed="${i===active}" aria-label="${esc(s.name)}・スロット${i+1}"><small>${i+1}</small><strong>${esc(s.name||`スロット${i+1}`)}</strong></button>
+      <button type="button" class="slot-rename" data-action="slot-rename" data-kind="${kind}" data-index="${i}" aria-label="${esc(s.name)}の名前を変更" title="名前を変更">${ico('rename')}</button>
+    </div>`).join('')}</div>`;
   }
   function header(){
+    if(page==='practice'||page==='setlist')return `<header class="app-header app-header-slots">${slotButtons(page)}</header>`;
     let title='曲リスト',left='',right='';
-    if(page==='tasks'){title='タスク';right=`<button class="top-tool" data-action="task-add" aria-label="タスクを追加" title="タスクを追加">${ico('plus')}</button>`;}
-    else 
-    if(page==='detail'){
-      title='楽譜・詳細';left=`<button data-action="detail-back" class="nav-back">${ico('back')}戻る</button>`;
-    }else if(page==='practice'){title='練習タイテ';right=slotButtons('practice');}
-    else if(page==='setlist'){title='セトリ作成';right=slotButtons('setlist');}
-    else if(page==='metronome'){title='メトロノーム';}
-    else{right=`<button class="top-tool" data-action="data" aria-label="バックアップ・復元" title="バックアップ・復元">${ico('archive')}</button>`;}
+    if(page==='tasks'){
+      title='タスク';
+      right=`<button class="top-tool" data-action="task-toggle-completed" aria-pressed="${state.showCompleted}" aria-label="完了タスクを${state.showCompleted?'非表示':'表示'}" title="完了タスクを${state.showCompleted?'非表示':'表示'}">${ico(state.showCompleted?'eye':'eyeOff')}</button><button class="top-tool" data-action="task-add" aria-label="タスクを追加" title="タスクを追加">${ico('plus')}</button>`;
+    } else if(page==='detail'){
+      title='曲詳細';left=`<button data-action="detail-back" class="nav-back" aria-label="曲リストへ戻る">${ico('back')}</button>`;
+    } else if(page==='metronome')title='メトロノーム';
+    else right=`<button class="top-tool" data-action="data" aria-label="バックアップ・復元" title="バックアップ・復元">${ico('archive')}</button>`;
     return `<header class="app-header"><div class="header-left">${left}</div><div class="header-title">${esc(title)}</div><div class="header-right">${right}</div></header>`;
   }
   function tabs(){return `<nav class="tabbar" aria-label="画面切り替え">${[
     ['tasks','tasks','タスク'],['songs','songs','曲リスト'],['practice','clock','練習タイテ'],['setlist','list','セトリ作成'],['metronome','metronome','メトロノーム']
   ].map(([key,iconName,name])=>`<button class="tab ${page===key||(key==='songs'&&page==='detail')?'active':''}" data-action="tab" data-page="${key}" ${page===key?'aria-current="page"':''}>${ico(iconName)}<span>${name}</span></button>`).join('')}</nav>`;}
-  function songTable(songs){return `<div class="song-rows">${songs.map(song=>`<div class="song-row">
-      <span class="song-title">${esc(song.title)}</span><span class="song-data">${capoText(song)}</span>
-      <span class="song-data">${time(song.durationSeconds)}</span><span class="song-data">${song.bpm}</span>
-      <button class="score-btn" data-action="detail" data-song="${song.id}" title="${esc(song.title)}の楽譜・詳細" aria-label="${esc(song.title)}の楽譜・詳細を見る">${ico('score')}</button></div>`).join('')}</div>`;}
-  function songsPage(){const group=groupedSongs(state.sort);
-    return `<main class="page-scroll songs-page" data-scroll="song"><div class="hero"><div><span class="eyebrow">KORYOSAN SONG LIBRARY</span><h1>曲リスト</h1><p>持ち曲8曲をチューニング別に表示しています。</p></div><span class="song-counter">8 SONGS</span></div>
-      <div class="sortbar"><span>並び替え</span><div class="sortgroup" role="group" aria-label="並び替え">${[['capo','Capo順'],['name','名前順'],['duration','演奏時間順']].map(([k,t])=>`<button data-action="sort" data-sort="${k}" class="${state.sort===k?'selected':''}" aria-pressed="${state.sort===k}">${t}</button>`).join('')}</div></div>
-      <div class="table-labels"><span>曲名</span><span>Capo</span><span>演奏時間</span><span>BPM</span><span>楽譜</span></div>
-      ${group.map(({tuning,songs})=>`<section class="tuning-section"><div class="tuning-heading"><span class="tuning-mark"></span><h2>${esc(tuning)}</h2><small>${songs.length}曲</small></div>${songTable(songs)}</section>`).join('')}
-      <p class="footnote">楽譜アイコンから曲ごとの詳細画面を開けます。詳細機能は今後追加予定です。</p></main>`;
+  function songTable(songs,flat=false){return `<div class="song-rows">${songs.map(song=>`<div class="song-row ${flat?'flat':''}">
+    <span class="song-title">${esc(song.title)}</span>${flat?`<span class="song-tuning">${esc(song.tuning)}</span>`:''}<span class="song-data">${capoText(song)}</span>
+    <span class="song-data">${time(song.durationSeconds)}</span><span class="song-data">${song.bpm}</span>
+    <button class="score-btn" data-action="detail" data-song="${song.id}" title="${esc(song.title)}の詳細" aria-label="${esc(song.title)}の詳細を見る">${ico('score')}<span>詳細</span></button></div>`).join('')}</div>`;}
+  function songsPage(){
+    const flat=state.sort!=='capo';
+    const all=flat?KORYOSAN_SONGS.slice().sort(sorters[state.sort]):[];
+    return `<main class="page-scroll songs-page" data-scroll="song">
+      <div class="compact-page-heading"><h1>曲リスト</h1><span class="song-counter">${KORYOSAN_SONGS.length}</span></div>
+      <div class="sortbar"><div class="sortgroup" role="group" aria-label="並び替え">${[['capo','Capo順'],['name','名前順'],['duration','演奏時間順']].map(([k,t])=>`<button data-action="sort" data-sort="${k}" class="${state.sort===k?'selected':''}" aria-pressed="${state.sort===k}">${t}</button>`).join('')}</div></div>
+      <div class="table-labels ${flat?'flat':''}"><span>曲名</span>${flat?'<span>チューニング</span>':''}<span>Capo</span><span>演奏時間</span><span>BPM</span><span>詳細</span></div>
+      ${flat?songTable(all,true):groupedSongs('capo').map(({tuning,songs})=>`<section class="tuning-section"><div class="tuning-heading"><span class="tuning-mark"></span><h2>${esc(tuning)}</h2><small>${songs.length}</small></div>${songTable(songs)}</section>`).join('')}
+    </main>`;
   }
   function detailData(songId){
-    return state.detailEdits[songId] || {columns:['追記メモ 1'],cells:{}};
+    const saved=state.detailEdits[songId]||{columns:['追記メモ 1'],cells:{}};
+    const sections=KORYOSAN_DETAILS?.[songId]||[];
+    const cells={};
+    for(const [i,row] of sections.entries()){
+      const values=Array.isArray(saved.cells?.[i])?[...saved.cells[i]]:[];
+      // v3以前の固定コメントを3列目に移し、編集した内容（空欄含む）を優先。
+      if(!Object.prototype.hasOwnProperty.call(values,0)&&row.note)values[0]=row.note;
+      cells[i]=values;
+    }
+    return {columns:[...saved.columns],cells};
   }
   function detailsPage(){
     const song=songById.get(detailSong);if(!song)return songsPage();
-    const sections=KORYOSAN_DETAILS?.[song.id] || [];
-    const extra=detailData(song.id);
-    const cols=extra.columns.length;
+    const sections=KORYOSAN_DETAILS?.[song.id]||[];
+    const extra=detailData(song.id),cols=extra.columns.length;
     return `<main class="page-scroll details-page" data-scroll="detail">
-      <div class="detail-hero"><span class="eyebrow">SONG DETAILS / 1・2列目は閲覧専用</span><h1>${esc(song.title)}</h1>
-        <div class="detail-metadata"><span>チューニング：${esc(song.tuning)}</span><span>Capo：${capoText(song)}</span><span>${song.bpm} BPM</span><span>演奏時間：${time(song.durationSeconds)}</span></div></div>
-      ${sections.length ? `<div class="detail-tools"><p>1・2列目は固定。3列目以降の各セル右上にある✎から自由に追記できます。</p><button type="button" class="detail-add-column" data-action="detail-add-column" ${cols>=6?'disabled':''}>${ico('plus')} 列を追加</button></div>
-      <div class="detail-scroll-hint">表を横にスクロールすると、3列目以降の編集欄が表示されます。<span aria-hidden="true"> →</span></div>
+      <div class="detail-hero"><h1>${esc(song.title)}</h1><div class="detail-metadata"><span>${esc(song.tuning)}</span><span>Capo ${capoText(song)}</span><span>${song.bpm} BPM</span><span>${time(song.durationSeconds)}</span></div></div>
+      ${sections.length?`<div class="detail-tools"><button type="button" class="detail-add-column" data-action="detail-add-column" aria-label="追記列を追加" title="追記列を追加" ${cols>=6?'disabled':''}>${ico('plus')}</button></div>
       <div class="detail-lyrics-wrap" role="region" aria-label="${esc(song.title)}の構成・歌詞・追記欄" tabindex="0">
         <div class="detail-lyrics-table" style="--detail-extra-count:${cols}">
-          <div class="detail-lyrics-head" role="row"><span role="columnheader">構成</span><span role="columnheader">歌詞・備考</span>${extra.columns.map(label=>`<span role="columnheader">${esc(label)}</span>`).join('')}</div>
-          ${sections.map((row,i)=>`<div class="detail-lyric-row" role="row">
-            <div class="detail-structure" role="cell">${esc(row.section)}</div>
-            <div class="detail-lyric-cell" role="cell">${row.lyrics?`<div class="detail-lyric-text">${esc(row.lyrics)}</div>`:''}${row.note?`<div class="detail-lyric-note">${esc(row.note)}</div>`:''}</div>
-            ${extra.columns.map((_,column)=>{const text=extra.cells[i]?.[column]||'';return `<div class="detail-extra-cell" role="cell"><button type="button" class="detail-edit-button" data-action="detail-edit" data-row="${i}" data-column="${column}" aria-label="${esc(row.section)}、${esc(extra.columns[column])}を編集" title="このセルを編集">${ico('edit')}<span>編集</span></button>${text?`<div class="detail-extra-content">${esc(text)}</div>`:'<div class="detail-empty">タップして記入</div>'}</div>`;}).join('')}
+          <div class="detail-lyrics-head" role="row"><span role="columnheader">構成</span><span role="columnheader">歌詞・備考</span>${extra.columns.map((label,index)=>`<span class="detail-col-head" role="columnheader"><span class="detail-col-name">${esc(label)}</span><button class="detail-rename-button" type="button" data-action="detail-rename-column" data-column="${index}" title="列名を変更" aria-label="${esc(label)}の列名を変更">${ico('edit')}</button></span>`).join('')}</div>
+          ${sections.map((row,i)=>`<div class="detail-lyric-row" role="row"><div class="detail-structure" role="cell">${esc(row.section)}</div>
+            <div class="detail-lyric-cell" role="cell">${row.lyrics?`<div class="detail-lyric-text">${esc(row.lyrics)}</div>`:''}</div>
+            ${extra.columns.map((_,column)=>{const val=extra.cells[i]?.[column]??'';return `<div class="detail-extra-cell" role="cell"><button type="button" class="detail-edit-button" data-action="detail-edit" data-row="${i}" data-column="${column}" aria-label="${esc(row.section)}、${esc(extra.columns[column])}を編集" title="編集">${ico('edit')}</button>${val?`<div class="detail-extra-content">${esc(val)}</div>`:''}</div>`;}).join('')}
           </div>`).join('')}
         </div>
-      </div>` :
-      `<div class="detail-placeholder"><strong>構成・歌詞は準備中です</strong><p>この曲の詳細情報は後日追加予定です。</p></div>`}
+      </div>`:'<div class="detail-placeholder">—</div>'}
     </main>`;
   }
   function openDetailEdit(row,column){
@@ -189,7 +222,7 @@
     const sections=KORYOSAN_DETAILS?.[detailSong];
     const current=detailData(detailSong);
     if(!sections?.[row]||!Number.isInteger(column)||column<0||column>=current.columns.length)return;
-    const data=state.detailEdits[detailSong]||(state.detailEdits[detailSong]={columns:[...current.columns],cells:{}});
+    const data=state.detailEdits[detailSong]||(state.detailEdits[detailSong]=current);
     const rowValues=data.cells[row]||[];
     rowValues[column]=String(fields.get('content')||'').slice(0,5000);
     data.cells[row]=rowValues;
@@ -197,28 +230,52 @@
   }
   function addDetailColumn(){
     if(page!=='detail'||!detailSong||!KORYOSAN_DETAILS?.[detailSong]?.length)return;
-    const current=detailData(detailSong);
-    if(current.columns.length>=6){toast('追記列は6列まで追加できます');return;}
-    const data=state.detailEdits[detailSong]||(state.detailEdits[detailSong]={columns:[...current.columns],cells:{}});
-    data.columns.push(`追記メモ ${data.columns.length+1}`);
-    save();render();
-    const container=document.querySelector('.detail-lyrics-wrap');if(container){container.scrollLeft=container.scrollWidth;scrollPos.detailX=container.scrollLeft;}
-    toast('編集用の列を追加しました');
+    const data=detailData(detailSong);
+    if(data.columns.length>=6){toast('最大6列です');return;}
+    const n=data.columns.length+1;
+    data.columns.unshift(`追記メモ ${n}`);
+    for(const row of Object.values(data.cells))row.unshift('');
+    state.detailEdits[detailSong]=data;save();render();
+    const wrap=document.querySelector('.detail-lyrics-wrap');if(wrap)wrap.scrollLeft=0;
+  }
+  function openColumnRename(index){
+    if(page!=='detail'||!detailSong)return;
+    const data=detailData(detailSong);if(!Number.isInteger(index)||index<0||index>=data.columns.length)return;
+    modalOpen=true;
+    $modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="列名の変更"><div class="dialog-head"><h2>列名</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div>
+      <form id="detail-rename-form" class="task-form"><input type="hidden" name="column" value="${index}"><label>列名<input type="text" name="label" value="${esc(data.columns[index])}" required maxlength="30"></label><div class="task-form-actions"><button type="button" class="task-cancel" data-action="close-dialog">キャンセル</button><button type="submit" class="task-submit">保存</button></div></form></section></div>`;
+  }
+  function submitColumnRename(form){
+    if(page!=='detail'||!detailSong)return;
+    const fields=new FormData(form),i=Number(fields.get('column')),name=String(fields.get('label')||'').trim().slice(0,30),data=detailData(detailSong);
+    if(!name||!Number.isInteger(i)||i<0||i>=data.columns.length)return;
+    data.columns[i]=name;state.detailEdits[detailSong]=data;save();closeData();render();
   }
   function taskStatusClass(status){return {'進行中':'in-progress','レビュー依頼':'in-review','保留':'on-hold','完了':'done'}[status]||'in-progress';}
+  function sortedTasks(){
+    const compare=(a,b)=>{
+      const completed=Number(a.status==='完了')-Number(b.status==='完了');if(completed)return completed;
+      if(state.taskSort==='member'){
+        const key=t=>t.members.length?TASK_MEMBERS.filter(m=>t.members.includes(m)).map(m=>TASK_MEMBERS.indexOf(m)).join(','):'z';
+        return key(a).localeCompare(key(b))||a.deadline.localeCompare(b.deadline)||naturalCompare(a.name,b.name);
+      }
+      return a.deadline.localeCompare(b.deadline)||naturalCompare(a.name,b.name);
+    };
+    return state.tasks.filter(t=>state.showCompleted||t.status!=='完了').slice().sort(compare);
+  }
   function tasksPage(){
-    const tasks=state.tasks;
-    return `<main class="page-scroll tasks-page" data-scroll="task"><div class="hero"><div><span class="eyebrow">KORYOSAN TASK BOARD</span><h1>タスク</h1><p>担当と期限を決めて、作業の進捗を管理します。</p></div><span class="song-counter">${tasks.length} TASKS</span></div>
-      <div class="task-summary"><span>全 ${tasks.length}件</span><span>進行中 ${tasks.filter(t=>t.status==='進行中').length}件</span><span>レビュー依頼 ${tasks.filter(t=>t.status==='レビュー依頼').length}件</span><span>完了 ${tasks.filter(t=>t.status==='完了').length}件</span></div>
-      <div class="tasks-table" role="table" aria-label="タスク一覧"><div class="task-table-header" role="row"><span>分類</span><span>タスク名</span><span>ステータス</span><span>期限</span><span>担当</span><span>備考</span></div>
-      ${tasks.map(task=>`<button class="task-table-row" type="button" role="row" data-action="task-edit" data-id="${esc(task.id)}" aria-label="${esc(task.name)}を編集">
-        <span class="task-col task-category"><small>分類</small>${esc(task.category)}</span>
-        <span class="task-col task-name"><small>タスク名</small>${esc(task.name)}</span>
-        <span class="task-col"><small>ステータス</small><span class="task-status ${taskStatusClass(task.status)}">${esc(task.status)}</span></span>
-        <span class="task-col task-deadline"><small>期限</small>${esc(task.deadline)}</span>
-        <span class="task-col task-members"><small>担当</small>${task.members.length?esc(task.members.join(' ')):'—'}</span>
-        <span class="task-col task-notes"><small>備考</small>${task.notes?esc(task.notes):'—'}</span></button>`).join('')}
-      ${tasks.length?'':`<div class="tasks-empty"><strong>まだタスクはありません</strong><p>画面右上の＋からタスクを追加できます。</p><button data-action="task-add" type="button">＋ タスクを追加</button></div>`}</div></main>`;
+    const tasks=sortedTasks();
+    return `<main class="page-scroll tasks-page" data-scroll="task">
+      <div class="compact-page-heading"><h1>タスク</h1><span class="song-counter">${state.tasks.length}</span></div>
+      <div class="task-sortbar"><div class="sortgroup" role="group" aria-label="タスクの並び替え">${[['deadline','期限順'],['member','担当者順']].map(([k,label])=>`<button data-action="task-sort" data-sort="${k}" aria-pressed="${state.taskSort===k}" class="${state.taskSort===k?'selected':''}">${label}</button>`).join('')}</div><div class="task-status-count">${state.tasks.filter(t=>t.status!=='完了').length} / ${state.tasks.length}</div></div>
+      <div class="tasks-table" role="region" aria-label="タスク一覧・横スクロール可能" tabindex="0"><div class="tasks-grid"><div class="task-table-header" role="row"><span>分類</span><span>タスク名</span><span>ステータス</span><span>期限</span><span>担当</span><span>備考</span></div>
+      ${tasks.map(task=>`<button class="task-table-row ${task.status==='完了'?'is-done':''}" type="button" role="row" data-action="task-edit" data-id="${esc(task.id)}" aria-label="${esc(task.name)}を編集">
+        <span class="task-col task-category">${esc(task.category)}</span>
+        <span class="task-col task-name">${esc(task.name)}</span>
+        <span class="task-col"><span class="task-status ${taskStatusClass(task.status)}">${esc(task.status)}</span></span>
+        <span class="task-col task-deadline">${esc(task.deadline)}</span><span class="task-col task-members">${task.members.length?esc(task.members.join(' ')):'—'}</span>
+        <span class="task-col task-notes">${task.notes?esc(task.notes):'—'}</span></button>`).join('')}</div></div>
+    </main>`;
   }
   function taskOption(value,selected){return `<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(value)}</option>`;}
   function openTask(id=null){
@@ -236,7 +293,7 @@
         <label>備考<textarea name="notes" rows="4" maxlength="4000" placeholder="補足情報を入力">${esc(t.notes)}</textarea></label>
         <div class="task-form-actions">${original?`<button class="task-delete" type="button" data-action="task-delete" data-id="${esc(id)}">削除</button>`:''}<button class="task-cancel" type="button" data-action="close-dialog">キャンセル</button><button class="task-submit" type="submit">${original?'変更を保存':'追加する'}</button></div>
       </form></section></div>`;
-    $modal.querySelector('[name="name"]')?.focus();
+    // スマートフォンで新規追加時にキーボードを自動表示しない。
   }
   function submitTask(form){
     const data=new FormData(form),name=String(data.get('name')||'').trim(),deadline=String(data.get('deadline')||'');
@@ -246,34 +303,52 @@
     const idx=state.tasks.findIndex(x=>x.id===task.id);if(idx>=0)state.tasks[idx]=task;else state.tasks.push(task);
     save();closeData();render();toast(idx>=0?'タスクを更新しました':'タスクを追加しました');
   }
-  function slotIntro(kind){const s=slot(kind);const idx=kind==='practice'?state.activePractice:state.activeSetlist;
-    return `<div class="slot-intro"><div class="slot-input-row"><div class="slot-caption"><span class="eyebrow">SLOT ${idx+1} / 3</span><label for="slot-name">スロット名（直接編集できます）</label></div><div class="slot-name-field">${ico('rename')}<input id="slot-name" data-input="name" data-kind="${kind}" type="text" maxlength="40" value="${esc(s.name)}" aria-label="スロット${idx+1}の名前" placeholder="スロット名"></div></div><div class="slot-utilities"><span class="save-hint">編集内容は自動保存</span><button class="copy-button" data-action="copy-slot" data-kind="${kind}">${ico('copy')} コピー</button></div></div>`;}
-  function timebar(kind){const s=slot(kind),used=sum(kind),remaining=s.minutes*(kind==='practice'?1:60)-used,practice=kind==='practice',display=practice?`${remaining}分`:time(remaining);
-    return `<div class="timebar"><span id="remaining" class="remaining ${remaining<0?'negative':''}">残り ${display}</span><span class="time-spacer"></span><label for="planned-minutes">${practice?'練習時間':'持ち時間'}</label><input id="planned-minutes" type="number" min="0" max="999" inputmode="numeric" value="${s.minutes}" aria-label="${practice?'練習時間':'持ち時間'}（分）"><span>分</span></div>`;}
-  function setEntry(item,index){const song=songById.get(item.songId);if(!song)return '';
-    return `<article class="draft-row" data-entry="${esc(item.id)}"><div class="draft-top"><button class="drag-handle" data-handle="true" aria-label="${esc(song.title)}をドラッグして並べ替え" title="ドラッグして並べ替え">⠿</button><span class="draft-index">${index+1}.</span><strong>${esc(song.title)}</strong><button class="remove" data-action="remove" data-kind="setlist" data-id="${esc(item.id)}" aria-label="${esc(song.title)}を削除">×</button></div><div class="draft-meta">${song.tuning?esc(song.tuning)+' · ':''}${song.capo==null?'Capoなし':'Capo '+song.capo} · ${time(song.durationSeconds)}${song.bpm?' · '+song.bpm+' BPM':''}</div></article>`;
+  function slotIntro(kind){return `<div class="slot-utilities-strip"><button class="copy-button" data-action="copy-slot" data-kind="${kind}" aria-label="${kind==='practice'?'練習タイテ':'セトリ'}をコピー" title="コピー">${ico('copy')}</button></div>`;}
+  function timebar(kind){
+    const s=slot(kind),practice=kind==='practice';
+    if(practice){
+      const span=practiceSpan(s),left=span-sum('practice');
+      return `<div class="timebar practice-timebar"><span id="remaining" class="remaining ${left<0?'negative':''}">残り ${left}分</span><span class="time-spacer"></span><div class="time-range" role="group" aria-label="練習時間帯"><label class="time-picker"><span class="time-value" id="practice-start-label">${esc(s.startTime)}</span><input type="time" id="practice-start" aria-label="練習開始時刻" value="${esc(s.startTime)}"></label><span>〜</span><label class="time-picker"><span class="time-value" id="practice-end-label">${esc(s.endTime)}</span><input type="time" id="practice-end" aria-label="練習終了時刻" value="${esc(s.endTime)}"></label></div></div>`;
+    }
+    const remaining=s.minutes*60-sum('setlist');
+    return `<div class="timebar"><span id="remaining" class="remaining ${remaining<0?'negative':''}">残り ${time(remaining)}</span><span class="time-spacer"></span><label for="planned-minutes">持ち時間</label><input id="planned-minutes" type="number" min="0" max="999" inputmode="numeric" value="${s.minutes}" aria-label="持ち時間（分）"><span>分</span></div>`;
   }
-  function pickGroup(tuning,songs,extra=false){return `<section class="pick-group"><h3>${esc(tuning)} <small>${songs.length}項目</small></h3>${songs.map(song=>`<button class="pick-row" data-action="add-song" data-id="${song.id}"><span><strong>${esc(song.title)}</strong><small>${extra?time(song.durationSeconds):`${song.capo==null?'Capoなし':'Capo '+song.capo} · ${time(song.durationSeconds)} · ${song.bpm} BPM`}</small></span><b>＋</b></button>`).join('')}</section>`;}
+  function setEntry(item,index){const song=songById.get(item.songId);if(!song)return '';
+    return `<article class="draft-row ${song.tuning==='DADGAD'?'tuning-dadgad':song.tuning?'tuning-regular':'tuning-other'}" data-entry="${esc(item.id)}"><div class="draft-top"><button class="drag-handle" data-handle="true" aria-label="${esc(song.title)}をドラッグして並べ替え" title="ドラッグして並べ替え">⠿</button><span class="draft-index">${index+1}.</span><strong>${esc(song.title)}</strong><button class="remove" data-action="remove" data-kind="setlist" data-id="${esc(item.id)}" aria-label="${esc(song.title)}を削除">×</button></div><div class="draft-meta">${song.tuning?esc(song.tuning)+' · ':''}${song.capo==null?'Capoなし':'Capo '+song.capo} · ${time(song.durationSeconds)}${song.bpm?' · '+song.bpm+' BPM':''}</div></article>`;
+  }
+  function pickGroup(tuning,songs,extra=false){return `<section class="pick-group ${extra?'tuning-other':tuning==='DADGAD'?'tuning-dadgad':'tuning-regular'}"><h3>${esc(tuning)} <small>${songs.length}項目</small></h3>${songs.map(song=>`<button class="pick-row" data-action="add-song" data-id="${song.id}"><span><strong>${esc(song.title)}</strong><small>${extra?time(song.durationSeconds):`${song.capo==null?'Capoなし':'Capo '+song.capo} · ${time(song.durationSeconds)} · ${song.bpm} BPM`}</small></span><b>＋</b></button>`).join('')}</section>`;}
   function setlistPage(){const s=slot('setlist');return `${slotIntro('setlist')}${timebar('setlist')}
-    <div class="columns"><section class="column"><header>SETLIST <span>${s.entries.length}項目 · 使用 ${time(sum('setlist'))}</span></header><div class="column-scroll" data-scroll="setDraft">${s.entries.length?s.entries.map(setEntry).join(''):'<p class="empty-message">右の曲をタップして追加してください。</p>'}</div></section><div class="vertical-rule"></div><section class="column"><header>持ち曲（タップで追加）</header><div class="column-scroll" data-scroll="setLibrary">${groupedSongs('capo').map(g=>pickGroup(g.tuning,g.songs)).join('')}${pickGroup('その他',KORYOSAN_EXTRA,true)}</div></section></div>`;}
+    <div class="columns"><section class="column"><header>SETLIST <span>${s.entries.length}項目 · 使用 ${time(sum('setlist'))}</span></header><div class="column-scroll" data-scroll="setDraft">${s.entries.length?s.entries.map(setEntry).join(''):''}</div></section><div class="vertical-rule"></div><section class="column"><header>持ち曲（タップで追加）</header><div class="column-scroll" data-scroll="setLibrary">${groupedSongs('capo').map(g=>pickGroup(g.tuning,g.songs)).join('')}${pickGroup('その他',KORYOSAN_EXTRA,true)}</div></section></div>`;}
   const optionsForMinutes=value=>Array.from({length:48},(_,i)=>5*(i+1)).map(v=>`<option value="${v}" ${v===value?'selected':''}>${v}分</option>`).join('');
-  function practiceEntry(item,index){const preset=practiceById.get(item.presetId);if(!preset)return '';
-    return `<article class="draft-row practice-row" data-entry="${esc(item.id)}"><div class="draft-top"><button class="drag-handle" data-handle="true" aria-label="${esc(preset.title)}を並べ替え" title="ドラッグして並べ替え">⠿</button><span class="draft-index">${index+1}.</span><strong>${esc(preset.title)}</strong><button class="remove" data-action="remove" data-kind="practice" data-id="${esc(item.id)}" aria-label="${esc(preset.title)}を削除">×</button></div><div class="practice-edit"><label>時間 <select aria-label="${esc(preset.title)}の時間" data-select="entry-minutes" data-id="${esc(item.id)}">${optionsForMinutes(item.minutes)}</select></label><label class="note-label" for="note-${esc(item.id)}">備考</label><textarea id="note-${esc(item.id)}" rows="2" maxlength="3000" data-input="note" data-id="${esc(item.id)}" placeholder="曲名や練習内容を記入">${esc(item.note)}</textarea></div></article>`;}
+  function practiceEntry(item,index,elapsed){const preset=practiceById.get(item.presetId);if(!preset)return '';
+    const start=minutesOf(slot('practice').startTime)??0;
+    return `<article class="draft-row practice-row" data-entry="${esc(item.id)}">
+      <div class="draft-top"><button class="drag-handle" data-handle="true" aria-label="${esc(preset.title)}を並べ替え">⠿</button><span class="draft-index">${index+1}.</span><strong>${esc(preset.title)}</strong><span class="practice-slot-time" data-time-entry="${esc(item.id)}">${clockOf(start+elapsed)}〜${clockOf(start+elapsed+item.minutes)}</span><button class="remove" data-action="remove" data-kind="practice" data-id="${esc(item.id)}" aria-label="削除">×</button></div>
+      <div class="practice-edit"><select aria-label="${esc(preset.title)}の継続時間" data-select="entry-minutes" data-id="${esc(item.id)}">${optionsForMinutes(item.minutes)}</select><textarea aria-label="${esc(preset.title)}の備考" rows="1" maxlength="3000" data-input="note" data-id="${esc(item.id)}" placeholder="備考">${esc(item.note)}</textarea></div>
+    </article>`;
+  }
+  function practiceEntries(entries){let elapsed=0;return entries.map((item,i)=>{const row=practiceEntry(item,i,elapsed);elapsed+=item.minutes;return row;}).join('');}
   function practicePage(){const s=slot('practice');return `${slotIntro('practice')}${timebar('practice')}
-    <div class="columns practice-columns"><section class="column"><header>PRACTICE TIMETABLE <span>${s.entries.length}項目 · 合計${sum('practice')}分</span></header><div class="column-scroll" data-scroll="practiceDraft">${s.entries.length?s.entries.map(practiceEntry).join(''):'<p class="empty-message">右のメニューをタップして追加してください。時間と備考は後から変更できます。</p>'}</div></section><div class="vertical-rule"></div><section class="column"><header>練習メニュー</header><div class="column-scroll practice-menu" data-scroll="practiceLibrary">${KORYOSAN_PRACTICE.map(item=>`<button class="pick-row practice-pick" data-action="add-practice" data-id="${item.id}"><span><strong>${esc(item.title)}</strong><small>デフォルト ${item.minutes}分</small></span><b>＋</b></button>`).join('')}</div></section></div>`;}
+    <div class="columns practice-columns"><section class="column"><header>タイムテーブル <span>${s.entries.length} · ${sum('practice')}分</span></header><div class="column-scroll" data-scroll="practiceDraft">${practiceEntries(s.entries)}</div></section><div class="vertical-rule"></div><section class="column"><header>メニュー</header><div class="column-scroll practice-menu" data-scroll="practiceLibrary">${KORYOSAN_PRACTICE.map(item=>`<button class="pick-row practice-pick" data-action="add-practice" data-id="${item.id}"><span><strong>${esc(item.title)}</strong><small>${item.minutes}分</small></span><b>＋</b></button>`).join('')}</div></section></div>`;}
   function render(){storeScroll();window.KoryoMetronome?.unmount();
     $app.innerHTML=`${header()}<div class="app-content">${page==='tasks'?tasksPage():page==='songs'?songsPage():page==='detail'?detailsPage():page==='setlist'?setlistPage():page==='practice'?practicePage():'<div id="metronome-root"></div>'}</div>${tabs()}`;
     restoreScroll();if(page==='metronome')window.KoryoMetronome?.mount(document.getElementById('metronome-root'));
     document.title=`校了さん${page==='detail'?'｜楽譜・詳細':''}`;
   }
-  function updateTime(){const el=document.getElementById('remaining');if(!el)return;const kind=page==='practice'?'practice':'setlist';const s=slot(kind);const remaining=s.minutes*(kind==='practice'?1:60)-sum(kind);
-    el.textContent='残り '+(kind==='practice'?`${remaining}分`:time(remaining));el.classList.toggle('negative',remaining<0);
-    const heading=document.querySelector('.column:first-child header span');if(heading)heading.textContent=kind==='practice'?`${s.entries.length}項目 · 合計${sum(kind)}分`:`${s.entries.length}項目 · 使用 ${time(sum(kind))}`;
+  function updateTime(){
+    const el=document.getElementById('remaining');if(!el)return;
+    const isPractice=page==='practice',kind=isPractice?'practice':'setlist',s=slot(kind),used=sum(kind);
+    const remain=isPractice?practiceSpan(s)-used:s.minutes*60-used;
+    el.textContent=isPractice?`残り ${remain}分`:'残り '+time(remain);el.classList.toggle('negative',remain<0);
+    const heading=document.querySelector('.column:first-child header span');if(heading)heading.textContent=isPractice?`${s.entries.length} · ${used}分`:`${s.entries.length}項目 · 使用 ${time(used)}`;
+    if(isPractice){let elapsed=0;const start=minutesOf(s.startTime)??0;
+      for(const item of s.entries){const label=[...document.querySelectorAll('[data-time-entry]')].find(el=>el.dataset.timeEntry===item.id);if(label)label.textContent=`${clockOf(start+elapsed)}〜${clockOf(start+elapsed+item.minutes)}`;elapsed+=item.minutes;}
+    }
   }
   function moveEntry(kind,id,targetId){const list=slot(kind).entries;const from=list.findIndex(e=>e.id===id),to=list.findIndex(e=>e.id===targetId);if(from<0||to<0||from===to)return;const [entry]=list.splice(from,1);list.splice(to,0,entry);save();render();}
   function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細の追記メモ、3つの練習タイテ、3つのセトリ、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元すると現在の6スロットの内容が置き換わります。端末を変更する前やアプリを削除する前に、必ずバックアップを保存してください。</p></section></div>`;}
   function closeData(){modalOpen=false;$modal.innerHTML='';}
-  function downloadBackup(){const obj={app:'Koryosan_PWA',version:3,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
+  function downloadBackup(){const obj={app:'Koryosan_PWA',version:4,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
   async function readBackup(file){if(!file)return;if(file.size>8*1024*1024){toast('8MB以下のファイルを指定してください');return;}try{
       const obj=JSON.parse(await file.text());if(obj.app!=='Koryosan_PWA'||!obj.state)throw Error('校了さん用のバックアップを選んでください');
       const nextState=validate(obj.state);if(!confirm('現在のタスク・セトリ・練習タイテ・曲別追記メモをバックアップの内容で置き換えますか？'))return;
@@ -282,7 +357,7 @@
     }catch(e){console.error(e);alert('読み込めませんでした：'+e.message);}}
   function slotText(kind){
     const s=slot(kind);
-    if(kind==='practice')return ['＝＝＝＝＝＝＝',s.name,`練習時間 ${s.minutes}分`,`合計 ${sum('practice')}分`,'',...s.entries.map((e,i)=>{const p=practiceById.get(e.presetId);return `${i+1}. ${p.title}　${e.minutes}分${e.note?'\n   '+e.note:''}`;}),'＝＝＝＝＝＝＝'].join('\n');
+    if(kind==='practice')return ['＝＝＝＝＝＝＝',s.name,`練習時間 ${s.startTime}〜${s.endTime}`,`合計 ${sum('practice')}分`,'',...s.entries.map((e,i)=>{const p=practiceById.get(e.presetId);return `${i+1}. ${p.title}　${e.minutes}分${e.note?'\n   '+e.note:''}`;}),'＝＝＝＝＝＝＝'].join('\n');
     let count=0;
     return ['＝＝＝＝＝＝＝',s.name,'',...s.entries.map(entry=>{
       const song=songById.get(entry.songId);if(!song)return '';
@@ -296,17 +371,31 @@
     try{if(!navigator.clipboard?.writeText)throw Error('Clipboard unavailable');await navigator.clipboard.writeText(txt);toast('コピーしました');}
     catch(_){const t=document.createElement('textarea');t.value=txt;document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();toast(ok?'コピーしました':'コピーできませんでした');}
   }
-  function updateSlotName(){const input=document.getElementById('slot-name');if(!input)return;const kind=input.dataset.kind,s=slot(kind);const val=input.value.slice(0,40);s.name=val;save();const chip=document.querySelector(`.slot-button.active small`);if(chip)chip.textContent=val||'名称未設定';const btn=document.querySelector('.slot-button.active');if(btn)btn.setAttribute('aria-label',(val||'名称未設定')+'：選択中');}
+  function openSlotRename(kind,i){
+    const items=kind==='practice'?state.practiceSlots:state.setlistSlots,s=items[i];if(!s)return;
+    modalOpen=true;
+    $modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="スロット名変更"><div class="dialog-head"><h2>スロット名</h2><button type="button" data-action="close-dialog" aria-label="閉じる">×</button></div>
+    <form class="task-form" id="slot-rename-form"><input type="hidden" name="kind" value="${kind}"><input type="hidden" name="index" value="${i}"><label>名称<input name="name" type="text" maxlength="40" required value="${esc(s.name)}"></label><div class="task-form-actions"><button type="button" class="task-cancel" data-action="close-dialog">キャンセル</button><button type="submit" class="task-submit">保存</button></div></form></section></div>`;
+  }
+  function submitSlotRename(form){
+    const data=new FormData(form),kind=data.get('kind'),index=Number(data.get('index')),name=String(data.get('name')||'').trim().slice(0,40);
+    if(!['practice','setlist'].includes(kind)||!Number.isInteger(index)||index<0||index>=3||!name)return;
+    (kind==='practice'?state.practiceSlots:state.setlistSlots)[index].name=name;save();closeData();render();
+  }
   function action(el){const what=el.dataset.action;
     if(what==='tab'){page=el.dataset.page;detailSong=null;render();return;}
     if(what==='detail'){scrollPos.detail=0;scrollPos.detailX=0;detailSong=el.dataset.song;page='detail';render();return;}
     if(what==='detail-back'){page='songs';detailSong=null;render();return;}
     if(what==='detail-edit'){openDetailEdit(Number(el.dataset.row),Number(el.dataset.column));return;}
     if(what==='detail-add-column'){addDetailColumn();return;}
+    if(what==='detail-rename-column'){openColumnRename(Number(el.dataset.column));return;}
     if(what==='task-add'){openTask();return;}
+    if(what==='task-sort'){state.taskSort=el.dataset.sort==='member'?'member':'deadline';save();render();return;}
+    if(what==='task-toggle-completed'){state.showCompleted=!state.showCompleted;save();render();return;}
     if(what==='task-edit'){openTask(el.dataset.id);return;}
     if(what==='task-delete'){const id=el.dataset.id;const task=state.tasks.find(t=>t.id===id);if(!task||!confirm(`「${task.name}」を削除しますか？`))return;state.tasks=state.tasks.filter(t=>t.id!==id);save();closeData();render();toast('タスクを削除しました');return;}
     if(what==='sort'){state.sort=el.dataset.sort;save();render();return;}
+    if(what==='slot-rename'){openSlotRename(el.dataset.kind,Number(el.dataset.index));return;}
     if(what==='slot'){const idx=Number(el.dataset.index);if(idx<0||idx>=SLOTS)return;if(el.dataset.kind==='practice')state.activePractice=idx;else state.activeSetlist=idx;save();render();return;}
     if(what==='add-song'){if(!songById.has(el.dataset.id))return;slot('setlist').entries.push({id:guid(),songId:el.dataset.id});save();render();return;}
     if(what==='add-practice'){const item=practiceById.get(el.dataset.id);if(!item)return;slot('practice').entries.push({id:guid(),presetId:item.id,minutes:item.minutes,note:''});save();render();return;}
@@ -320,19 +409,23 @@
   }
   // All event handlers are delegated because screen DOM is replaced on tab switches.
   document.addEventListener('click',e=>{const btn=e.target.closest('[data-action]');if(!btn||btn.disabled)return;if(btn.dataset.action==='overlay'&&e.target!==btn)return;action(btn);});
-  document.addEventListener('submit',e=>{if(e.target.id==='task-form'){e.preventDefault();submitTask(e.target);}else if(e.target.id==='detail-edit-form'){e.preventDefault();submitDetailEdit(e.target);}});
+  document.addEventListener('submit',e=>{if(e.target.id==='task-form'){e.preventDefault();submitTask(e.target);}else if(e.target.id==='detail-edit-form'){e.preventDefault();submitDetailEdit(e.target);}else if(e.target.id==='detail-rename-form'){e.preventDefault();submitColumnRename(e.target);}else if(e.target.id==='slot-rename-form'){e.preventDefault();submitSlotRename(e.target);}});
   document.addEventListener('input',e=>{
-    const el=e.target;if(el.dataset.input==='name'){updateSlotName();return;}
+    const el=e.target;
     if(el.dataset.input==='note'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);if(entry){entry.note=el.value.slice(0,3000);save();}return;}
     if(el.id==='planned-minutes'){const num=Number(el.value);if(el.value!==''&&Number.isInteger(num)&&num>=0&&num<=999){slot(page==='practice'?'practice':'setlist').minutes=num;save();updateTime();}}
   });
   document.addEventListener('change',e=>{
     const el=e.target;
     if(el.dataset.select==='entry-minutes'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);const n=Number(el.value);if(entry&&Number.isInteger(n)&&n>=5&&n<=240&&n%5===0){entry.minutes=n;save();updateTime();}return;}
-    if(el.id==='planned-minutes'){el.value=slot(page==='practice'?'practice':'setlist').minutes;return;}
+    if(['practice-start','practice-end'].includes(el.id)){
+      const n=minutesOf(el.value);if(n===null){el.value=slot('practice')[el.id==='practice-start'?'startTime':'endTime'];return;}
+      slot('practice')[el.id==='practice-start'?'startTime':'endTime']=el.value;const label=document.getElementById(el.id+'-label');if(label)label.textContent=el.value;save();updateTime();return;
+    }
+    if(el.id==='planned-minutes'){el.value=slot('setlist').minutes;return;}
     if(el.id==='backup-input'){void readBackup(el.files?.[0]);el.value='';}
   });
-  document.addEventListener('focusout',e=>{if(e.target.id==='planned-minutes')e.target.value=slot(page==='practice'?'practice':'setlist').minutes;});
+  document.addEventListener('focusout',e=>{if(e.target.id==='planned-minutes')e.target.value=slot('setlist').minutes;});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen)closeData();if(e.key==='Enter'&&e.target.id==='planned-minutes')e.target.blur();});
   // Drag handles work with touch and mouse; prevents accidental scroll only during the drag.
   document.addEventListener('pointerdown',e=>{

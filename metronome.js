@@ -37,7 +37,7 @@
     const letter=playing?config.sequence[index]:null;
     sel('#metro-letter').textContent=letter||'—';sel('#metro-bpm').textContent=letter?config.presets[letter]:'—';
     sel('#metro-progress').textContent=`${playing?index+1:0} / ${count}`;
-    sel('#metro-next').textContent=nl?`${nl} · ${config.presets[nl]} BPM`:'未設定';
+    sel('#metro-next').textContent=nl?`${nl} · ${config.presets[nl]} BPM`:'';
     sel('#metro-main-text').textContent=!count?'テンポを登録してください':playing?'次のテンポへ':'再生スタート';
     sel('#metro-main-sub').textContent=nl?`${nl} · ${config.presets[nl]} BPM`:'＋A / ＋B / ＋C';
     sel('#metro-advance').disabled=!count;sel('#metro-advance').dataset.letter=nl||'';

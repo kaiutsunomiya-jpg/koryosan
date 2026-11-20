@@ -48,7 +48,7 @@
   const practiceById=new Map(KORYOSAN_PRACTICE.map(item=>[item.id,item]));
   const newSetlist=i=>({name:`セトリ ${i+1}`,minutes:30,entries:[]});
   const newPractice=i=>({name:`練習 ${i+1}`,minutes:120,startTime:'18:00',endTime:'20:00',entries:[]});
-  const makeState=()=>({version:6,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],
+  const makeState=()=>({version:7,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],
     setlistSlots:Array.from({length:SLOTS},(_,i)=>newSetlist(i)),
     practiceSlots:Array.from({length:SLOTS},(_,i)=>newPractice(i))});
   function validate(raw){
@@ -90,8 +90,7 @@
       for(const [songId,entry] of Object.entries(raw.detailEdits)){
         const sections=KORYOSAN_DETAILS?.[songId];
         if(!sections?.length || !entry || typeof entry!=='object')continue;
-        const headers=Array.isArray(entry.columns) ? entry.columns.slice(0,6).map((v,i)=>typeof v==='string'?v.slice(0,30):`追記メモ ${i+1}`) : ['追記メモ 1'];
-        if(!headers.length && entry.noColumns!==true)headers.push('追記メモ 1');
+        const headers=Array.isArray(entry.columns) ? entry.columns.slice(0,6).map((v,i)=>typeof v==='string'?v.slice(0,30):`追記メモ ${i+1}`) : [];
         const cells={};
         if(entry.cells && typeof entry.cells==='object' && !Array.isArray(entry.cells)){
           for(const [index,values] of Object.entries(entry.cells)){
@@ -135,7 +134,7 @@
       createdAt:Number.isFinite(m.createdAt)?m.createdAt:0,
       rows:(Array.isArray(m.rows)?m.rows:[]).slice(0,200).map(r=>({id:typeof r?.id==='string'?r.id.slice(0,100):guid(),text:typeof r?.text==='string'?r.text.slice(0,10000):''}))
     }));
-    return {version:6,detailEdits,tasks,schedules,availability,meetings,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,showPastSchedules:raw.showPastSchedules!==false,sort:['capo','duration'].includes(raw.sort)?raw.sort:'capo',
+    return {version:7,detailEdits,tasks,schedules,availability,meetings,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,showPastSchedules:raw.showPastSchedules!==false,sort:['capo','duration'].includes(raw.sort)?raw.sort:'capo',
       activeSetlist:[0,1,2].includes(raw.activeSetlist)?raw.activeSetlist:0,
       activePractice:[0,1,2].includes(raw.activePractice)?raw.activePractice:0,
       setlistSlots:defaults.setlistSlots.map((s,i)=>validSlot(raw.setlistSlots?.[i],s,false)),
@@ -153,9 +152,9 @@
     // 旧版の保存データは自動削除しない。バックアップ後にユーザーの明示操作で削除。
     return data;
   }
-  let state=read(), page='tasks', detailSong=null, reviewColumnId=null, modalOpen=false, taskEditingId=null, dragging=null, availabilityRange=null;
+  let state=read(), page='tasks', detailSong=null, modalOpen=false, taskEditingId=null, dragging=null, availabilityRange=null;
   const meetingCollapsed=new Set();
-  const scrollPos={task:0,song:0,detail:0,detailX:0,practiceDraft:0,practiceLibrary:0,setDraft:0,setLibrary:0,schedule:0,meeting:0,review:0};
+  const scrollPos={task:0,song:0,detail:0,detailX:0,practiceDraft:0,practiceLibrary:0,setDraft:0,setLibrary:0,schedule:0,meeting:0};
   let lastPublished=clone(state), pendingRemote=null;
   function persistPrefs(){
     try{localStorage.setItem(PREFS_KEY,JSON.stringify({sort:state.sort,taskSort:state.taskSort,showCompleted:state.showCompleted,showPastSchedules:state.showPastSchedules,activeSetlist:state.activeSetlist,activePractice:state.activePractice}));}
@@ -189,7 +188,7 @@
     lastPublished=clone(state);
     const affectsCurrent =
       (branch==='tasks' && page==='tasks') ||
-      (branch==='songNotes' && ['detail','review'].includes(page)) ||
+      (branch==='songNotes' && page==='detail') ||
       (branch==='schedules' && page==='schedule') || (branch==='availability' && page==='availability') || (branch==='meetings' && page==='meeting') ||
       (branch==='practiceSlots' && page==='practice') ||
       (branch==='setlistSlots' && page==='setlist') ||
@@ -204,7 +203,7 @@
   function slot(kind){return kind==='setlist'?state.setlistSlots[state.activeSetlist]:state.practiceSlots[state.activePractice];}
   function sum(kind){return slot(kind).entries.reduce((n,e)=>n+(kind==='practice'?e.minutes:(songById.get(e.songId)?.durationSeconds||0)),0);}
   function groupedSongs(sortMode){return KORYOSAN_TUNINGS.map(t=>({tuning:t,songs:KORYOSAN_SONGS.filter(s=>s.tuning===t).slice().sort(sorters[sortMode]||byCapo)}));}
-  function storeScroll(){for(const [key,el] of Object.entries({task:document.querySelector('[data-scroll="task"]'),detail:document.querySelector('[data-scroll="detail"]'),song:document.querySelector('[data-scroll="song"]'),practiceDraft:document.querySelector('[data-scroll="practiceDraft"]'),practiceLibrary:document.querySelector('[data-scroll="practiceLibrary"]'),setDraft:document.querySelector('[data-scroll="setDraft"]'),setLibrary:document.querySelector('[data-scroll="setLibrary"]'),schedule:document.querySelector('[data-scroll="schedule"]'),meeting:document.querySelector('[data-scroll="meeting"]'),review:document.querySelector('[data-scroll="review"]')}))if(el)scrollPos[key]=el.scrollTop;
+  function storeScroll(){for(const [key,el] of Object.entries({task:document.querySelector('[data-scroll="task"]'),detail:document.querySelector('[data-scroll="detail"]'),song:document.querySelector('[data-scroll="song"]'),practiceDraft:document.querySelector('[data-scroll="practiceDraft"]'),practiceLibrary:document.querySelector('[data-scroll="practiceLibrary"]'),setDraft:document.querySelector('[data-scroll="setDraft"]'),setLibrary:document.querySelector('[data-scroll="setLibrary"]'),schedule:document.querySelector('[data-scroll="schedule"]'),meeting:document.querySelector('[data-scroll="meeting"]')}))if(el)scrollPos[key]=el.scrollTop;
     const table=document.querySelector('.detail-lyrics-wrap');if(table)scrollPos.detailX=table.scrollLeft;
   }
   function restoreScroll(){Object.keys(scrollPos).forEach(key=>{const el=document.querySelector(`[data-scroll="${key}"]`);if(el)el.scrollTop=scrollPos[key];});
@@ -213,7 +212,7 @@
   function slotButtons(kind){
     const arr=kind==='practice'?state.practiceSlots:state.setlistSlots,active=kind==='practice'?state.activePractice:state.activeSetlist;
     return `<div class="header-slotbar" role="group" aria-label="${kind==='practice'?'練習タイテ':'セトリ'}のスロット">${arr.map((s,i)=>`<div class="header-slot ${i===active?'active':''}">
-      <button type="button" class="slot-button" data-action="slot" data-kind="${kind}" data-index="${i}" aria-pressed="${i===active}" aria-label="${esc(s.name)}・スロット${i+1}"><small>${i+1}</small><strong>${esc(s.name||`スロット${i+1}`)}</strong></button>
+      <button type="button" class="slot-button" data-action="slot" data-kind="${kind}" data-index="${i}" aria-pressed="${i===active}" aria-label="${esc(s.name)}・スロット${i+1}"><small>${i+1}</small><strong>${esc(s.name)}</strong></button>
       <button type="button" class="slot-rename" data-action="slot-rename" data-kind="${kind}" data-index="${i}" aria-label="${esc(s.name)}の名前を変更" title="名前を変更">${ico('rename')}</button>
     </div>`).join('')}</div>`;
   }
@@ -229,8 +228,6 @@
       title='空き日程';right=`<button class="top-today" data-action="availability-today">今日</button>`;
     } else if(page==='meeting'){
       title='会議';right=`<button class="top-tool" data-action="meeting-toggle-all" title="すべて開閉" aria-label="全議題を開閉">${ico('chevron')}</button><button class="top-tool" data-action="meeting-add" title="議題を追加" aria-label="議題を追加">${ico('plus')}</button>`;
-    } else if(page==='review'){
-      title='コメントレビュー';left=`<button data-action="review-back" class="nav-back" aria-label="曲詳細へ戻る">${ico('back')}</button>`;
     } else if(page==='detail'){
       title='曲詳細';left=`<button data-action="detail-back" class="nav-back" aria-label="曲リストへ戻る">${ico('back')}</button>`;
     } else if(page==='metronome')title='メトロノーム';
@@ -239,7 +236,7 @@
   }
   function tabs(){return `<nav class="tabbar" aria-label="画面切り替え">${[
     ['tasks','tasks','タスク'],['songs','songs','曲リスト'],['practice','clock','練習タイテ'],['setlist','list','セトリ作成'],['metronome','metronome','メトロノーム'],['schedule','clock','スケジュール'],['availability','tasks','空き日程'],['meeting','edit','会議']
-  ].map(([key,iconName,name])=>`<button class="tab ${page===key||(key==='songs'&&['detail','review'].includes(page))?'active':''}" data-action="tab" data-page="${key}" ${page===key?'aria-current="page"':''}>${ico(iconName)}<span>${name}</span></button>`).join('')}</nav>`;}
+  ].map(([key,iconName,name])=>`<button class="tab ${page===key||(key==='songs'&&page==='detail')?'active':''}" data-action="tab" data-page="${key}" ${page===key?'aria-current="page"':''}>${ico(iconName)}<span>${name}</span></button>`).join('')}</nav>`;}
   function songTable(songs,flat=false){return `<div class="song-rows">${songs.map(song=>`<div class="song-row ${flat?'flat':''}">
     <span class="song-title">${esc(song.title)}</span>${flat?`<span class="song-tuning">${esc(song.tuning)}</span>`:''}<span class="song-data">${capoText(song)}</span>
     <span class="song-data">${time(song.durationSeconds)}</span><span class="song-data">${song.bpm}</span>
@@ -255,7 +252,7 @@
     </main>`;
   }
   function detailData(songId){
-    const saved=state.detailEdits[songId]||{columns:['追記メモ 1'],columnIds:['memo1'],cells:{},descriptions:{},reviews:{}};
+    const saved=state.detailEdits[songId]||{columns:[],columnIds:[],cells:{},descriptions:{},reviews:{},noColumns:true};
     const sections=KORYOSAN_DETAILS?.[songId]||[];
     const cells={};
     for(const [i,row] of sections.entries()){
@@ -274,20 +271,15 @@
       <div class="detail-hero"><h1>${esc(song.title)}</h1><div class="detail-metadata"><span>${esc(song.tuning)}</span><span>Capo ${capoText(song)}</span><span>${song.bpm} BPM</span><span>${time(song.durationSeconds)}</span></div></div>
       ${sections.length?`<div class="detail-tools"><button type="button" class="detail-add-column" data-action="detail-add-column" aria-label="追記列を追加" title="追記列を追加" ${cols>=6?'disabled':''}>${ico('plus')}</button></div>
       <div class="detail-lyrics-wrap" role="region" aria-label="${esc(song.title)}の構成・歌詞・追記欄" tabindex="0">
-        <div class="detail-lyrics-table" style="--detail-extra-count:${cols}">
+        <div class="detail-lyrics-table ${cols===0?'detail-no-memos':''}" style="--detail-extra-count:${cols}">
           <div class="detail-lyrics-head detail-header-v6" role="row">
             <span class="detail-fixed-section" role="columnheader">構成</span><span class="detail-fixed-lyrics" role="columnheader">歌詞</span>
-            ${extra.columns.map((label,index)=>{const id=extra.columnIds[index];return `<div class="detail-memo-head" role="columnheader"><div class="detail-memo-controls"><button type="button" data-action="detail-review" data-column-id="${esc(id)}" title="コメントレビュー" aria-label="${esc(label)}のコメントレビュー">👀</button><button type="button" data-action="detail-delete-column" data-column="${index}" title="この列を削除" aria-label="${esc(label)}を削除">${ico('trash')}</button></div><div class="detail-col-head"><span class="detail-col-name">${esc(label)}</span><button class="detail-rename-button" type="button" data-action="detail-rename-column" data-column="${index}" title="列名を変更" aria-label="${esc(label)}の列名を変更">${ico('edit')}</button></div><textarea data-detail-desc="${esc(id)}" rows="1" maxlength="2000" placeholder="説明・リンクなど" aria-label="${esc(label)}の説明">${esc(extra.descriptions[id]||'')}</textarea></div>`;}).join('')}
+            ${extra.columns.map((label,index)=>{const id=extra.columnIds[index];return `<div class="detail-memo-head" role="columnheader"><div class="detail-memo-controls"><button type="button" data-action="detail-delete-column" data-column="${index}" title="この列を削除" aria-label="${esc(label)}を削除">${ico('trash')}</button></div><div class="detail-col-head"><span class="detail-col-name">${esc(label)}</span><button class="detail-rename-button" type="button" data-action="detail-rename-column" data-column="${index}" title="列名を変更" aria-label="${esc(label)}の列名を変更">${ico('edit')}</button></div><textarea data-detail-desc="${esc(id)}" rows="1" maxlength="2000" aria-label="${esc(label)}の説明">${esc(extra.descriptions[id]||'')}</textarea></div>`;}).join('')}
           </div>
           ${sections.map((row,i)=>`<div class="detail-lyric-row" role="row"><div class="detail-structure" role="cell">${esc(row.section)}</div><div class="detail-lyric-cell" role="cell">${row.lyrics?`<div class="detail-lyric-text">${esc(row.lyrics)}</div>`:''}</div>${extra.columns.map((_,column)=>{const val=extra.cells[i]?.[column]??'';return `<div class="detail-extra-cell" role="cell"><button type="button" class="detail-edit-button" data-action="detail-edit" data-row="${i}" data-column="${column}" aria-label="${esc(row.section)}、${esc(extra.columns[column])}を編集" title="編集">${ico('edit')}</button>${val?`<div class="detail-extra-content">${esc(val)}</div>`:''}</div>`;}).join('')}</div>`).join('')}
         </div>
       </div>`:'<div class="detail-placeholder">—</div>'}
     </main>`;
-  }
-  function reviewPage(){
-    const song=songById.get(detailSong);const data=detailData(detailSong);const index=data.columnIds.indexOf(reviewColumnId);if(!song||index<0)return detailsPage();
-    const sections=KORYOSAN_DETAILS?.[detailSong]||[];
-    return `<main class="page-scroll review-page" data-scroll="review"><h1>${esc(song.title)} ／ ${esc(data.columns[index])}</h1><div class="review-intro">各区間の追記メモとコメントを確認できます。コメントはFirebaseで共有されます。</div><div class="review-list">${sections.map((row,i)=>`<section class="review-item"><h2>${esc(row.section)}</h2><div class="review-memo">${esc(data.cells[i]?.[index]||'（追記メモなし）')}</div><label>レビューコメント<textarea data-review-row="${i}" data-review-col="${esc(reviewColumnId)}" rows="2" maxlength="3000" placeholder="コメントを入力">${esc(data.reviews[reviewColumnId]?.[i]||'')}</textarea></label></section>`).join('')}</div></main>`;
   }
   function openDetailEdit(row,column){
     if(page!=='detail'||!detailSong)return;
@@ -300,7 +292,7 @@
       <div class="dialog-head"><h2>追記メモを編集</h2><button type="button" data-action="close-dialog" aria-label="閉じる">×</button></div>
       <div class="detail-edit-context">${esc(songById.get(detailSong)?.title)} ／ ${esc(section.section)} ／ ${esc(extra.columns[column])}</div>
       <form id="detail-edit-form" class="task-form"><input type="hidden" name="row" value="${row}"><input type="hidden" name="column" value="${column}">
-        <label>内容<textarea name="content" rows="9" maxlength="5000" placeholder="この区間の演奏メモなどを記入">${esc(current)}</textarea></label>
+        <label>内容<textarea name="content" rows="9" maxlength="5000">${esc(current)}</textarea></label>
         <div class="task-form-actions"><button type="button" class="task-cancel" data-action="close-dialog">キャンセル</button><button type="submit" class="task-submit">変更を保存</button></div>
       </form></section></div>`;
     $modal.querySelector('textarea[name="content"]')?.focus();
@@ -342,7 +334,7 @@
     if(!name||!Number.isInteger(i)||i<0||i>=data.columns.length)return;
     data.columns[i]=name;state.detailEdits[detailSong]=data;save();closeData();render();
   }
-  function taskStatusClass(status){return {'進行中':'in-progress','レビュー依頼':'in-review','保留':'on-hold','完了':'done'}[status]||'in-progress';}
+  function taskStatusClass(status){return {'進行中':'in-progress','レビュー依頼':'in-review','保留':'on-hold','完了':'done'}[status]||'';}
   function sortedTasks(){
     const compare=(a,b)=>{
       const completed=Number(a.status==='完了')-Number(b.status==='完了');if(completed)return completed;
@@ -364,11 +356,11 @@
       <div class="task-sortbar"><div class="sortgroup" role="group" aria-label="タスクの並び替え">${[['deadline','期限順'],['member','担当者順']].map(([k,label])=>`<button data-action="task-sort" data-sort="${k}" aria-pressed="${state.taskSort===k}" class="${state.taskSort===k?'selected':''}">${label}</button>`).join('')}</div></div>
       <div class="tasks-table" role="region" aria-label="タスク一覧"><div class="tasks-grid"><div class="task-table-header" role="row"><span>分類</span><span>タスク名</span><span>ステータス</span><span>期限</span><span>担当</span><span>場所</span><span>備考</span></div>
       ${tasks.map(task=>`<button class="task-table-row ${task.status==='完了'?'is-done':''} ${task.category==='🎸【アレンジ】'?'task-is-arrange':task.category==='✒️【作業】'?'task-is-work':'task-is-blank'} ${!task.name?'task-is-draft':''}" type="button" role="row" data-action="task-edit" data-id="${esc(task.id)}" aria-label="${esc(task.name)}を編集">
-        <span class="task-col task-category">${esc(task.category||'未設定')}</span>
-        <span class="task-col task-name">${esc(task.name||'タスク名未設定')}</span>
-        <span class="task-col"><span class="task-status ${taskStatusClass(task.status)}">${esc(task.status||'未設定')}</span></span>
-        <span class="task-col task-deadline">${esc(task.deadline)}</span><span class="task-col task-members">${task.members.length?esc(task.members.join(' ')):'—'}</span>
-        <span class="task-col task-place">${esc(task.place||'—')}</span><span class="task-col task-notes">${task.notes?esc(task.notes):'—'}</span></button>`).join('')}</div></div>
+        <span class="task-col task-category">${esc(task.category||'')}</span>
+        <span class="task-col task-name">${esc(task.name||'')}</span>
+        <span class="task-col"><span class="task-status ${taskStatusClass(task.status)}">${esc(task.status||'')}</span></span>
+        <span class="task-col task-deadline">${esc(task.deadline)}</span><span class="task-col task-members">${task.members.length?esc(task.members.join(' ')):''}</span>
+        <span class="task-col task-place">${esc(task.place||'')}</span><span class="task-col task-notes">${task.notes?esc(task.notes):''}</span></button>`).join('')}</div></div>
     </main>`;
   }
   function taskOption(value,selected){return `<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(value)}</option>`;}
@@ -380,11 +372,11 @@
     $modal.innerHTML=`<div class="overlay task-overlay" data-action="overlay"><section class="dialog task-dialog" role="dialog" aria-modal="true" aria-label="${original?'タスクを編集':'タスクを追加'}">
       <div class="dialog-head"><h2>${original?'タスクを編集':'タスクを追加'}</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div>
       <form id="task-form" class="task-form"><label>分類<select name="category">${taskOption('','')}${TASK_CATEGORIES.map(x=>taskOption(x,t.category)).join('')}</select></label>
-        <label>タスク名<input name="name" type="text" maxlength="200" required placeholder="タスク名を入力" value="${esc(t.name)}"></label>
+        <label>タスク名<input name="name" type="text" maxlength="200" required value="${esc(t.name)}"></label>
         <label>ステータス<select name="status">${taskOption('','')}${TASK_STATUSES.map(x=>taskOption(x,t.status)).join('')}</select></label>
         <label>期限<input name="deadline" type="date" required value="${esc(t.deadline)}"></label>
         <fieldset><legend>担当（複数選択可）</legend><div class="task-member-options">${TASK_MEMBERS.map(x=>`<label><input type="checkbox" name="members" value="${x}" ${t.members.includes(x)?'checked':''}><span>${x}</span></label>`).join('')}</div></fieldset>
-        <label>場所<input name="place" type="text" maxlength="400" value="${esc(t.place||'')}" placeholder="場所（任意）"></label><label>備考<textarea name="notes" rows="4" maxlength="4000" placeholder="補足情報を入力">${esc(t.notes)}</textarea></label>
+        <label>場所<input name="place" type="text" maxlength="400" value="${esc(t.place||'')}"></label><label>備考<textarea name="notes" rows="4" maxlength="4000">${esc(t.notes)}</textarea></label>
         <div class="task-form-actions">${original?`<button class="task-delete" type="button" data-action="task-delete" data-id="${esc(id)}">削除</button>`:''}<button class="task-cancel" type="button" data-action="close-dialog">キャンセル</button><button class="task-submit" type="submit">${original?'変更を保存':'追加する'}</button></div>
       </form></section></div>`;
     // スマートフォンで新規追加時にキーボードを自動表示しない。
@@ -418,14 +410,14 @@
     const start=minutesOf(slot('practice').startTime)??0;
     return `<article class="draft-row practice-row" data-entry="${esc(item.id)}">
       <div class="draft-top"><button class="drag-handle" data-handle="true" aria-label="${esc(preset.title)}を並べ替え">⠿</button><span class="draft-index">${index+1}.</span><strong>${esc(preset.title)}</strong><span class="practice-slot-time" data-time-entry="${esc(item.id)}">${clockOf(start+elapsed)}〜${clockOf(start+elapsed+item.minutes)}</span><button class="remove" data-action="remove" data-kind="practice" data-id="${esc(item.id)}" aria-label="削除">×</button></div>
-      <div class="practice-edit"><select aria-label="${esc(preset.title)}の継続時間" data-select="entry-minutes" data-id="${esc(item.id)}">${optionsForMinutes(item.minutes)}</select><textarea aria-label="${esc(preset.title)}の備考" rows="1" maxlength="3000" data-input="note" data-id="${esc(item.id)}" placeholder="備考">${esc(item.note)}</textarea></div>
+      <div class="practice-edit"><select aria-label="${esc(preset.title)}の継続時間" data-select="entry-minutes" data-id="${esc(item.id)}">${optionsForMinutes(item.minutes)}</select><textarea aria-label="${esc(preset.title)}の備考" rows="1" maxlength="3000" data-input="note" data-id="${esc(item.id)}">${esc(item.note)}</textarea></div>
     </article>`;
   }
   function practiceEntries(entries){let elapsed=0;return entries.map((item,i)=>{const row=practiceEntry(item,i,elapsed);elapsed+=item.minutes;return row;}).join('');}
   function practicePage(){const s=slot('practice');return `${slotIntro('practice')}${timebar('practice')}
     <div class="columns practice-columns"><section class="column"><header>タイムテーブル <span>${s.entries.length} · ${sum('practice')}分</span></header><div class="column-scroll" data-scroll="practiceDraft">${practiceEntries(s.entries)}</div></section><div class="vertical-rule"></div><section class="column"><header>メニュー</header><div class="column-scroll practice-menu" data-scroll="practiceLibrary">${KORYOSAN_PRACTICE.map(item=>`<button class="pick-row practice-pick" data-action="add-practice" data-id="${item.id}"><span><strong>${esc(item.title)}</strong><small>${item.minutes}分</small></span><b>＋</b></button>`).join('')}</div></section></div>`;}
   // 校了さん v6: スケジュール・空き日程・会議（Firebase共有）
-  const NEW_CATEGORIES=[{id:'',label:'未設定'},{id:'practice',label:'💪練習'},{id:'live',label:'🎸ライブ'},{id:'other',label:'🥟その他'}];
+  const NEW_CATEGORIES=[{id:'',label:''},{id:'practice',label:'💪練習'},{id:'live',label:'🎸ライブ'},{id:'other',label:'🥟その他'}];
   const DAY_LABELS=['日','月','火','水','木','金','土'];
   const fiveMinuteTimes=Array.from({length:288},(_,i)=>`${pad(Math.floor(i/12))}:${pad((i%12)*5)}`);
   const dateOfKey=key=>new Date(`${key}T12:00:00`);
@@ -437,7 +429,7 @@
     el.style.height='auto';el.style.height=`${Math.max(25,el.scrollHeight)}px`;
   }
   function resizeAutos(node){node?.querySelectorAll('textarea:not(.task-form textarea)').forEach(resizeOne);}
-  function newTimeOptions(selected){return `<option value="" ${!selected?'selected':''}>--:--</option>`+fiveMinuteTimes.map(t=>`<option value="${t}" ${t===selected?'selected':''}>${t}</option>`).join('');}
+  function newTimeOptions(selected){return `<option value="" ${!selected?'selected':''}></option>`+fiveMinuteTimes.map(t=>`<option value="${t}" ${t===selected?'selected':''}>${t}</option>`).join('');}
   function scheduleCard(s){
     const today=localDate(),past=s.date<today;
     return `<article class="k6-schedule ${s.category?'k6-cat-'+s.category:'k6-cat-none'} ${past?'k6-past':''}" data-schedule-id="${esc(s.id)}">
@@ -445,9 +437,9 @@
         <label><small>項目</small><select data-schedule-field="category" aria-label="予定の種類">${NEW_CATEGORIES.map(c=>`<option value="${c.id}" ${c.id===s.category?'selected':''}>${c.label}</option>`).join('')}</select></label>
         <label><small>日付</small><input data-schedule-field="date" type="date" value="${esc(s.date)}" aria-label="予定の日付"></label>
         <label class="k6-time-field"><small>時間</small><span class="k6-time-selects"><select data-schedule-field="start" aria-label="開始時刻">${newTimeOptions(s.start)}</select><span>〜</span><select data-schedule-field="end" aria-label="終了時刻">${newTimeOptions(s.end)}</select></span></label>
-        <label><small>場所</small><input data-schedule-field="place" type="text" maxlength="400" value="${esc(s.place)}" placeholder="未設定" aria-label="場所"></label>
+        <label><small>場所</small><input data-schedule-field="place" type="text" maxlength="400" value="${esc(s.place)}" aria-label="場所"></label>
       </div>
-      <div class="k6-schedule-note"><textarea data-schedule-field="notes" rows="1" maxlength="5000" placeholder="備考" aria-label="予定の備考">${esc(s.notes)}</textarea><button class="k6-remove" data-action="schedule-delete" data-id="${esc(s.id)}" title="予定を削除" aria-label="予定を削除">${ico('trash')}</button></div>
+      <div class="k6-schedule-note"><textarea data-schedule-field="notes" rows="1" maxlength="5000" aria-label="予定の備考">${esc(s.notes)}</textarea><button class="k6-remove" data-action="schedule-delete" data-id="${esc(s.id)}" title="予定を削除" aria-label="予定を削除">${ico('trash')}</button></div>
     </article>`;
   }
   function schedulePage(){
@@ -491,7 +483,7 @@
     return `<div class="k6-avail-row ${key===localDate()?'k6-today':''}" data-day="${key}">
       <div class="k6-date">${d.getMonth()+1}/${d.getDate()}<small>${d.getFullYear()}</small></div>
       <div class="k6-day ${holiday||wd===0?'k6-red':wd===6?'k6-blue':''}">${DAY_LABELS[wd]}${holiday?'祝':''}</div>
-      ${TASK_MEMBERS.map(m=>`<label class="k6-member"><textarea data-avail-day="${key}" data-member="${m}" rows="1" maxlength="400" placeholder="" aria-label="${key} ${m}の予定">${esc(vals[m]||'')}</textarea></label>`).join('')}
+      ${TASK_MEMBERS.map(m=>`<label class="k6-member"><textarea data-avail-day="${key}" data-member="${m}" rows="1" maxlength="400" aria-label="${key} ${m}の予定">${esc(vals[m]||'')}</textarea></label>`).join('')}
     </div>`;
   }
   function availabilityPage(){return `<div class="k6-availability"><div class="k6-avail-head"><span>日付</span><span>曜日</span>${TASK_MEMBERS.map(m=>`<span>${m}</span>`).join('')}</div><div id="avail-scroll" class="k6-avail-scroll"><div id="avail-days"></div></div></div>`;}
@@ -527,14 +519,14 @@
     const open=!meetingCollapsed.has(m.id);
     return `<article class="k6-meeting" data-meeting-id="${esc(m.id)}"><div class="k6-meeting-head">
       <button class="k6-expand ${open?'open':''}" data-action="meeting-expand" data-id="${esc(m.id)}" aria-expanded="${open}" title="${open?'閉じる':'開く'}">${ico('chevron')}</button>
-      <input type="text" data-meeting-title="${esc(m.id)}" maxlength="300" value="${esc(m.title)}" placeholder="タイトル未設定" aria-label="会議タイトル">
+      <input type="text" data-meeting-title="${esc(m.id)}" maxlength="300" value="${esc(m.title)}" aria-label="会議タイトル">
       <button class="k6-remove" data-action="meeting-delete" data-id="${esc(m.id)}" title="議題を削除" aria-label="議題を削除">${ico('trash')}</button>
-    </div>${open?`<div class="k6-meeting-body">${m.rows.map(row=>`<div class="k6-meeting-row"><textarea data-meeting-row="${esc(m.id)}" data-row-id="${esc(row.id)}" rows="1" maxlength="10000" placeholder="自由記述" aria-label="議題内容">${esc(row.text)}</textarea><button class="k6-remove" data-action="meeting-delete-row" data-id="${esc(m.id)}" data-row-id="${esc(row.id)}" title="この行を削除" aria-label="この行を削除">${ico('trash')}</button></div>`).join('')}<div class="k6-meeting-footer"><button class="k6-meeting-plus" data-action="meeting-add-row" data-id="${esc(m.id)}" aria-label="記述欄を追加" title="記述欄を追加">${ico('plus')}</button></div></div>`:''}</article>`;
+    </div>${open?`<div class="k6-meeting-body">${m.rows.map(row=>`<div class="k6-meeting-row"><textarea data-meeting-row="${esc(m.id)}" data-row-id="${esc(row.id)}" rows="1" maxlength="10000" aria-label="議題内容">${esc(row.text)}</textarea><button class="k6-remove" data-action="meeting-delete-row" data-id="${esc(m.id)}" data-row-id="${esc(row.id)}" title="この行を削除" aria-label="この行を削除">${ico('trash')}</button></div>`).join('')}<div class="k6-meeting-footer"><button class="k6-meeting-plus" data-action="meeting-add-row" data-id="${esc(m.id)}" aria-label="記述欄を追加" title="記述欄を追加">${ico('plus')}</button></div></div>`:''}</article>`;
   }
   function meetingPage(){return `<main class="page-scroll k6-page k6-meeting-page" data-scroll="meeting"><div class="k6-content">${state.meetings.length?state.meetings.map(meetingCard).join(''):'<div class="k6-empty">議題はありません</div>'}</div></main>`;}
 
   function render(){storeScroll();window.KoryoMetronome?.unmount();
-    $app.innerHTML=`${header()}<div class="app-content">${page==='tasks'?tasksPage():page==='songs'?songsPage():page==='detail'?detailsPage():page==='setlist'?setlistPage():page==='practice'?practicePage():page==='schedule'?schedulePage():page==='availability'?availabilityPage():page==='meeting'?meetingPage():page==='review'?reviewPage():'<div id="metronome-root"></div>'}</div>${tabs()}`;
+    $app.innerHTML=`${header()}<div class="app-content">${page==='tasks'?tasksPage():page==='songs'?songsPage():page==='detail'?detailsPage():page==='setlist'?setlistPage():page==='practice'?practicePage():page==='schedule'?schedulePage():page==='availability'?availabilityPage():page==='meeting'?meetingPage():'<div id="metronome-root"></div>'}</div>${tabs()}`;
     restoreScroll();if(page==='availability'){if(!availabilityRange)mountAvailability(localDate());else buildAvailability(availabilityRange.anchor,true);}resizeAutos($app);if(page==='metronome')window.KoryoMetronome?.mount(document.getElementById('metronome-root'));
     document.title=`校了さん${page==='detail'?'｜楽譜・詳細':''}`;
   }
@@ -549,9 +541,9 @@
     }
   }
   function moveEntry(kind,id,targetId){const list=slot(kind).entries;const from=list.findIndex(e=>e.id===id),to=list.findIndex(e=>e.id===targetId);if(from<0||to<0||from===to)return;const [entry]=list.splice(from,1);list.splice(to,0,entry);save();render();}
-  function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細・レビュー、練習タイテ、セトリ、スケジュール、空き日程、会議、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
+  function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細、練習タイテ、セトリ、スケジュール、空き日程、会議、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
   function closeData(){modalOpen=false;$modal.innerHTML='';setTimeout(flushRemote,0);}
-  function downloadBackup(){const obj={app:'Koryosan_PWA',version:6,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
+  function downloadBackup(){const obj={app:'Koryosan_PWA',version:7,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
   async function readBackup(file){if(!file)return;if(file.size>8*1024*1024){toast('8MB以下のファイルを指定してください');return;}try{
       const obj=JSON.parse(await file.text());if(obj.app!=='Koryosan_PWA'||!obj.state)throw Error('校了さん用のバックアップを選んでください');
       const nextState=validate(obj.state);
@@ -595,11 +587,9 @@
     if(what==='detail-edit'){openDetailEdit(Number(el.dataset.row),Number(el.dataset.column));return;}
     if(what==='detail-add-column'){addDetailColumn();return;}
     if(what==='detail-rename-column'){openColumnRename(Number(el.dataset.column));return;}
-    if(what==='detail-review'){reviewColumnId=el.dataset.columnId;page='review';scrollPos.review=0;render();return;}
-    if(what==='review-back'){page='detail';render();return;}
     if(what==='detail-delete-column'){
       const index=Number(el.dataset.column),data=detailData(detailSong),id=data.columnIds[index];
-      if(!id||!confirm(`「${data.columns[index]}」を削除しますか？ この列のメモ・レビューも削除されます。`))return;
+      if(!id||!confirm(`「${data.columns[index]}」を削除しますか？ この列のメモも削除されます。`))return;
       data.columns.splice(index,1);data.columnIds.splice(index,1);delete data.descriptions[id];delete data.reviews[id];
       for(const row of Object.values(data.cells))row.splice(index,1);
       if(!data.columns.length){data.noColumns=true;data.cells={};data.descriptions={};data.reviews={};}
@@ -651,7 +641,6 @@
     }
     if(el.dataset.meetingTitle){const m=state.meetings.find(x=>x.id===el.dataset.meetingTitle);if(m){m.title=el.value.slice(0,300);save();}return;}
     if(el.dataset.meetingRow){const m=state.meetings.find(x=>x.id===el.dataset.meetingRow),r=m?.rows.find(x=>x.id===el.dataset.rowId);if(r){r.text=el.value.slice(0,10000);save();resizeOne(el);}return;}
-    if(el.dataset.reviewRow!==undefined){const data=detailData(detailSong),id=el.dataset.reviewCol,row=Number(el.dataset.reviewRow);if(!data.columnIds.includes(id)||!Number.isInteger(row))return;data.reviews[id]??={};data.reviews[id][row]=el.value.slice(0,3000);state.detailEdits[detailSong]=data;save();resizeOne(el);return;}
     if(el.dataset.input==='note'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);if(entry){entry.note=el.value.slice(0,3000);save();}return;}
     if(el.id==='planned-minutes'){const num=Number(el.value);if(el.value!==''&&Number.isInteger(num)&&num>=0&&num<=999){slot(page==='practice'?'practice':'setlist').minutes=num;save();updateTime();}}
   });
@@ -678,6 +667,10 @@
     if(box.scrollTop<170)extendAvailability('past');else if(box.scrollTop+box.clientHeight>box.scrollHeight-450)extendAvailability('future');
   },true);
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen)closeData();if(e.key==='Enter'&&e.target.id==='planned-minutes')e.target.blur();});
+  // Prevent unintentional mobile double-tap / pinch zoom; scrolling and form editing remain enabled.
+  document.addEventListener('dblclick',event=>{if(event.cancelable)event.preventDefault();},{passive:false});
+  document.addEventListener('gesturestart',event=>{if(event.cancelable)event.preventDefault();},{passive:false});
+  document.addEventListener('gesturechange',event=>{if(event.cancelable)event.preventDefault();},{passive:false});
   // Drag handles work with touch and mouse; prevents accidental scroll only during the drag.
   document.addEventListener('pointerdown',e=>{
     const handle=e.target.closest('[data-handle]');if(!handle||!['setlist','practice'].includes(page)||e.button!==0)return;

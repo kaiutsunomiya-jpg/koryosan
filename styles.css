@@ -390,15 +390,6 @@
 .detail-memo-head textarea{resize:vertical;border:0;min-height:37px;background:#f8fcff;color:#32566c;width:100%;font-size:12px;padding:8px 9px;line-height:1.45;outline-offset:-2px;overflow-wrap:anywhere;white-space:pre-wrap}
 .detail-lyrics-head.detail-header-v6 .detail-rename-button{background:#fff}
 .detail-lyrics-head.detail-header-v6>span:not(:first-child){border-left:1px solid #c3dbe8}
-/* レビュー画面 */
-.review-page{width:100%;max-width:960px;margin:0 auto;padding:20px 18px 40px}
-.review-page h1{font-size:20px;color:#204e67;margin:2px 0 8px;overflow-wrap:anywhere}
-.review-intro{color:var(--muted);font-size:12px;margin:0 0 18px;line-height:1.7}
-.review-list{display:grid;gap:12px}.review-item{border:1px solid #cddfeb;border-radius:13px;background:#fff;padding:14px}
-.review-item h2{font-size:15px;margin:0 0 8px;color:var(--blue-deep)}
-.review-memo{white-space:pre-wrap;overflow-wrap:anywhere;color:#28536a;background:#e8f1f8;border-radius:8px;padding:10px;line-height:1.6;font-size:13px;margin-bottom:10px}
-.review-item label{display:flex;flex-direction:column;gap:6px;color:#52788d;font-size:12px}
-.review-item textarea{width:100%;min-height:50px;resize:vertical;border:1px solid #c7dce8;background:#fff;border-radius:8px;padding:9px 10px;color:var(--text);font-size:13px;line-height:1.6}
 /* スケジュール・空き日程・会議 */
 .k6-page{width:100%}.k6-content{width:100%;max-width:1190px;margin:0 auto;padding:15px clamp(9px,2vw,26px) 36px;display:grid;gap:10px}
 .k6-empty{text-align:center;color:#788e9d;padding:40px 15px;background:white;border:1px dashed #bdd2df;border-radius:13px}
@@ -434,7 +425,6 @@
 .k6-meeting{background:#fff;border:1px solid #ccdfeb;border-radius:13px;overflow:hidden;box-shadow:0 3px 14px #173b550a}
 .k6-meeting-head{display:flex;align-items:center;gap:6px;background:#23516c;min-height:48px;padding:6px 9px;color:#fff}
 .k6-meeting-head input{flex:1;min-width:0;background:transparent;border:0;border-radius:5px;padding:5px;font-size:14px;font-weight:800;color:#fff;outline-offset:0}
-.k6-meeting-head input::placeholder{color:#b9d3e2}
 .k6-meeting-head input:focus{background:#ffffff13}
 .k6-meeting-head .k6-remove{color:#d3e8f3}.k6-meeting-head .k6-remove:hover{background:#ffffff2a;color:white}
 .k6-expand{background:transparent;border:0;color:#e1eef6;flex:none;width:29px;height:31px;display:grid;place-items:center;transition:transform .17s}
@@ -554,3 +544,17 @@
 }
 
 @media(max-width:699px){.header-left,.header-right{min-width:65px}.header-title{font-size:16px}}
+
+/* v7: two fixed columns remain present even with zero additional memo columns. */
+.detail-lyrics-table.detail-no-memos .detail-header-v6,
+.detail-lyrics-table.detail-no-memos .detail-lyric-row {
+  display:grid;
+  grid-template-columns:var(--detail-structure-width) var(--detail-lyrics-width);
+  grid-auto-columns:0;
+}
+.detail-lyrics-table.detail-no-memos .detail-header-v6>.detail-fixed-section,
+.detail-lyrics-table.detail-no-memos .detail-header-v6>.detail-fixed-lyrics {display:flex!important;min-width:0;}
+/* Prevent accidental double-tap zoom; inputs remain large enough to avoid iOS focus zoom. */
+html,body,.app-shell,button,a,input,select,textarea {touch-action:manipulation;}
+html {-webkit-text-size-adjust:100%;text-size-adjust:100%;}
+@media (max-width:699px) {input,select,textarea {font-size:max(16px,1em);}}

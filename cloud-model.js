@@ -19,7 +19,6 @@
      const columnIds=sorted.map(([key])=>key);
      const columns=sorted.map(([,x])=>String(x?.title||'追記メモ'));
      const descriptions=Object.fromEntries(sorted.map(([id,x])=>[id,String(x?.description||'')]));
-     if(!columns.length&&block?.noColumns!==true){columnIds.push('memo1');columns.push('追記メモ 1');}
      const cells={};
      const n=details[songId]?.length||0;
      for(let i=0;i<n;i++){
@@ -36,7 +35,7 @@
  const slotArray=(blob,type)=>ids.map((id,i)=>{
    const row=sourceObj(blob?.[id]);
    const entries=Object.entries(sourceObj(row.entries)).map(([key,e])=>({id:key,...sourceObj(e)})).sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0)||a.id.localeCompare(b.id));
-   const basic={name:String(row.name||`${type==='practice'?'練習':'セトリ'} ${i+1}`),minutes:Number.isInteger(row.minutes)?row.minutes:(type==='practice'?120:30),entries};
+   const basic={name:String(row.name??`${type==='practice'?'練習':'セトリ'} ${i+1}`),minutes:Number.isInteger(row.minutes)?row.minutes:(type==='practice'?120:30),entries};
    return type==='practice'?{...basic,startTime:String(row.startTime||'18:00'),endTime:String(row.endTime||'20:00')}:basic;
  });
  const newSchedules=blob=>Object.entries(sourceObj(blob)).map(([id,x])=>({id,...sourceObj(x)}));
@@ -44,7 +43,7 @@
  const convert=(root)=>{
    const data=sourceObj(root),detailMap=sections(data.songSections);
    return {songs:songs(data.songs),details:detailMap,extras:songs(data.setlistExtras),practice: Object.entries(sourceObj(data.practicePresets)).map(([id,x])=>({id,title:String(x.title),minutes:Number(x.minutes)})),state:{
-       version:6,tasks:taskArray(data.tasks),detailEdits:songNotes(data.songNotes,detailMap),schedules:newSchedules(data.schedules),availability:sourceObj(data.availability),meetings:newMeetings(data.meetings),
+       version:7,tasks:taskArray(data.tasks),detailEdits:songNotes(data.songNotes,detailMap),schedules:newSchedules(data.schedules),availability:sourceObj(data.availability),meetings:newMeetings(data.meetings),
        setlistSlots:slotArray(data.setlistSlots,'setlist'),practiceSlots:slotArray(data.practiceSlots,'practice')
      }};
  };

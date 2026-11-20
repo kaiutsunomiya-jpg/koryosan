@@ -26,6 +26,7 @@
     eye:'<path d="M2 12s3.7-6 10-6 10 6 10 6-3.7 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
     eyeOff:'<path d="M3 3l18 18M10.6 6.2A11 11 0 0 1 12 6c6.3 0 10 6 10 6a13 13 0 0 1-3.2 3.7M6 6.5A13 13 0 0 0 2 12s3.7 6 10 6c1.7 0 3.3-.4 4.6-1.1"/>',
     logout:'<path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M16 17l5-5-5-5M21 12H9"/>',
+    trash:'<path d="M3 6h18M8 6V4h8v2M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
     copy:'<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'
   };
   const ico=(name)=>`<svg viewBox="0 0 24 24" class="icon" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[name]}</svg>`;
@@ -42,12 +43,12 @@
   const naturalCompare=(a,b)=>a.localeCompare(b,'ja',{numeric:true,sensitivity:'base'});
   const byCapo=(a,b)=>(a.capo??0)-(b.capo??0)||naturalCompare(a.title,b.title);
   const byDuration=(a,b)=>a.durationSeconds-b.durationSeconds||byCapo(a,b);
-  const sorters={capo:byCapo,name:(a,b)=>naturalCompare(a.title,b.title),duration:byDuration};
+  const sorters={capo:byCapo,duration:byDuration};
   const songById=new Map([...KORYOSAN_SONGS,...KORYOSAN_EXTRA].map(song=>[song.id,song]));
   const practiceById=new Map(KORYOSAN_PRACTICE.map(item=>[item.id,item]));
   const newSetlist=i=>({name:`セトリ ${i+1}`,minutes:30,entries:[]});
   const newPractice=i=>({name:`練習 ${i+1}`,minutes:120,startTime:'18:00',endTime:'20:00',entries:[]});
-  const makeState=()=>({version:4,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,activeSetlist:0,activePractice:0,tasks:[],
+  const makeState=()=>({version:6,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],
     setlistSlots:Array.from({length:SLOTS},(_,i)=>newSetlist(i)),
     practiceSlots:Array.from({length:SLOTS},(_,i)=>newPractice(i))});
   function validate(raw){
@@ -74,13 +75,15 @@
     };
     const tasks=Array.isArray(raw.tasks) ? raw.tasks.slice(0,2000).filter(t=>t&&typeof t==='object').map(t=>({
       id:typeof t.id==='string'?t.id.slice(0,100):guid(),
-      category:TASK_CATEGORIES.includes(t.category)?t.category:TASK_CATEGORIES[0],
+      category:TASK_CATEGORIES.includes(t.category)?t.category:'',
       name:typeof t.name==='string'?t.name.slice(0,200):'',
-      status:TASK_STATUSES.includes(t.status)?t.status:TASK_STATUSES[0],
+      status:TASK_STATUSES.includes(t.status)?t.status:'',
       deadline:typeof t.deadline==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(t.deadline)?t.deadline:localDate(),
       members:Array.isArray(t.members)?TASK_MEMBERS.filter(m=>t.members.includes(m)):[],
-      notes:typeof t.notes==='string'?t.notes.slice(0,4000):''
-    })).filter(t=>t.name.trim()):[];
+      notes:typeof t.notes==='string'?t.notes.slice(0,4000):'',
+      place:typeof t.place==='string'?t.place.slice(0,400):'',
+      createdAt:Number.isFinite(t.createdAt)?t.createdAt:0
+    })):[];
     // 1・2列目は固定。3列目以降だけ、曲ごとのテキストとして端末に保存する。
     const detailEdits={};
     if(raw.detailEdits && typeof raw.detailEdits==='object' && !Array.isArray(raw.detailEdits)){
@@ -88,7 +91,7 @@
         const sections=KORYOSAN_DETAILS?.[songId];
         if(!sections?.length || !entry || typeof entry!=='object')continue;
         const headers=Array.isArray(entry.columns) ? entry.columns.slice(0,6).map((v,i)=>typeof v==='string'?v.slice(0,30):`追記メモ ${i+1}`) : ['追記メモ 1'];
-        if(!headers.length)headers.push('追記メモ 1');
+        if(!headers.length && entry.noColumns!==true)headers.push('追記メモ 1');
         const cells={};
         if(entry.cells && typeof entry.cells==='object' && !Array.isArray(entry.cells)){
           for(const [index,values] of Object.entries(entry.cells)){
@@ -98,7 +101,9 @@
           }
         }
         const columnIds=Array.isArray(entry.columnIds)&&entry.columnIds.length===headers.length&&entry.columnIds.every(v=>typeof v==='string'&&/^[A-Za-z0-9_-]+$/.test(v)) ? entry.columnIds.slice() : headers.map((_,i)=>`memo${i+1}`);
-        detailEdits[songId]={columns:headers,columnIds,cells};
+        const descriptions=columnIds.map((id,i)=>typeof entry.descriptions?.[id]==='string'?entry.descriptions[id].slice(0,2000):typeof entry.descriptions?.[i]==='string'?entry.descriptions[i].slice(0,2000):'');
+        const reviews={};for(const id of columnIds){const source=entry.reviews?.[id]||{};const rows={};for(const [row,val] of Object.entries(source)){if(/^\d+$/.test(row)&&Number(row)<sections.length&&typeof val==='string')rows[row]=val.slice(0,3000);}reviews[id]=rows;}
+        detailEdits[songId]={columns:headers,columnIds,cells,descriptions:Object.fromEntries(columnIds.map((id,i)=>[id,descriptions[i]])),reviews,noColumns:headers.length===0};
       }
     }
     // v3で3列目に追記済みの内容と、2列目に置かれていた固定コメントを両方残す。
@@ -114,7 +119,23 @@
         }
       }
     }
-    return {version:4,detailEdits,tasks,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,sort:['capo','name','duration'].includes(raw.sort)?raw.sort:'capo',
+    const schedules=(Array.isArray(raw.schedules)?raw.schedules:[]).slice(0,2000).filter(Boolean).map(s=>({
+      id:typeof s.id==='string'?s.id.slice(0,100):guid(),category:['practice','live','other'].includes(s.category)?s.category:'',
+      date:/^\d{4}-\d{2}-\d{2}$/.test(s.date||'')?s.date:localDate(),
+      start:minutesOf(s.start)!==null&&minutesOf(s.start)%5===0?s.start:'',end:minutesOf(s.end)!==null&&minutesOf(s.end)%5===0?s.end:'',
+      place:typeof s.place==='string'?s.place.slice(0,400):'',notes:typeof s.notes==='string'?s.notes.slice(0,5000):'',createdAt:Number.isFinite(s.createdAt)?s.createdAt:0
+    }));
+    const availability={};for(const [day,vals] of Object.entries(raw.availability||{})){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!vals||typeof vals!=='object')continue;
+      const block={};for(const member of TASK_MEMBERS)if(typeof vals[member]==='string'&&vals[member])block[member]=vals[member].slice(0,400);
+      if(Object.keys(block).length)availability[day]=block;
+    }
+    const meetings=(Array.isArray(raw.meetings)?raw.meetings:[]).slice(0,1000).filter(Boolean).map(m=>({
+      id:typeof m.id==='string'?m.id.slice(0,100):guid(),title:typeof m.title==='string'?m.title.slice(0,300):'',
+      createdAt:Number.isFinite(m.createdAt)?m.createdAt:0,
+      rows:(Array.isArray(m.rows)?m.rows:[]).slice(0,200).map(r=>({id:typeof r?.id==='string'?r.id.slice(0,100):guid(),text:typeof r?.text==='string'?r.text.slice(0,10000):''}))
+    }));
+    return {version:6,detailEdits,tasks,schedules,availability,meetings,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,showPastSchedules:raw.showPastSchedules!==false,sort:['capo','duration'].includes(raw.sort)?raw.sort:'capo',
       activeSetlist:[0,1,2].includes(raw.activeSetlist)?raw.activeSetlist:0,
       activePractice:[0,1,2].includes(raw.activePractice)?raw.activePractice:0,
       setlistSlots:defaults.setlistSlots.map((s,i)=>validSlot(raw.setlistSlots?.[i],s,false)),
@@ -124,19 +145,20 @@
     // 認証前の公開用データや端末の旧版保存データを復元しない。
     const data=validate(window.__KORYO_INITIAL_STATE||makeState());
     try {const prefs=JSON.parse(localStorage.getItem(PREFS_KEY)||'{}');
-      data.sort=['capo','name','duration'].includes(prefs.sort)?prefs.sort:'capo';
-      data.taskSort=prefs.taskSort==='member'?'member':'deadline';data.showCompleted=prefs.showCompleted!==false;
+      data.sort=['capo','duration'].includes(prefs.sort)?prefs.sort:'capo';
+      data.taskSort=prefs.taskSort==='member'?'member':'deadline';data.showCompleted=prefs.showCompleted!==false;data.showPastSchedules=prefs.showPastSchedules!==false;
       data.activeSetlist=[0,1,2].includes(prefs.activeSetlist)?prefs.activeSetlist:0;
       data.activePractice=[0,1,2].includes(prefs.activePractice)?prefs.activePractice:0;
     }catch(_){}
     // 旧版の保存データは自動削除しない。バックアップ後にユーザーの明示操作で削除。
     return data;
   }
-  let state=read(), page='tasks', detailSong=null, modalOpen=false, taskEditingId=null, dragging=null;
-  const scrollPos={task:0,song:0,detail:0,detailX:0,practiceDraft:0,practiceLibrary:0,setDraft:0,setLibrary:0};
+  let state=read(), page='tasks', detailSong=null, reviewColumnId=null, modalOpen=false, taskEditingId=null, dragging=null, availabilityRange=null;
+  const meetingCollapsed=new Set();
+  const scrollPos={task:0,song:0,detail:0,detailX:0,practiceDraft:0,practiceLibrary:0,setDraft:0,setLibrary:0,schedule:0,meeting:0,review:0};
   let lastPublished=clone(state), pendingRemote=null;
   function persistPrefs(){
-    try{localStorage.setItem(PREFS_KEY,JSON.stringify({sort:state.sort,taskSort:state.taskSort,showCompleted:state.showCompleted,activeSetlist:state.activeSetlist,activePractice:state.activePractice}));}
+    try{localStorage.setItem(PREFS_KEY,JSON.stringify({sort:state.sort,taskSort:state.taskSort,showCompleted:state.showCompleted,showPastSchedules:state.showPastSchedules,activeSetlist:state.activeSetlist,activePractice:state.activePractice}));}
     catch(error){console.warn('設定保存:',error);}
   }
   function save(){
@@ -160,11 +182,15 @@
     if(branch==='songNotes')state.detailEdits=validate({...state,detailEdits:model.state.detailEdits}).detailEdits;
     if(branch==='setlistSlots')state.setlistSlots=validate({...state,setlistSlots:model.state.setlistSlots}).setlistSlots;
     if(branch==='practiceSlots')state.practiceSlots=validate({...state,practiceSlots:model.state.practiceSlots}).practiceSlots;
+    if(branch==='schedules')state.schedules=validate({...state,schedules:model.state.schedules}).schedules;
+    if(branch==='availability')state.availability=validate({...state,availability:model.state.availability}).availability;
+    if(branch==='meetings')state.meetings=validate({...state,meetings:model.state.meetings}).meetings;
     // 遠隔の更新は次回差分の基準にも反映し、他人の値を誤って再送信しない。
     lastPublished=clone(state);
     const affectsCurrent =
       (branch==='tasks' && page==='tasks') ||
-      (branch==='songNotes' && page==='detail') ||
+      (branch==='songNotes' && ['detail','review'].includes(page)) ||
+      (branch==='schedules' && page==='schedule') || (branch==='availability' && page==='availability') || (branch==='meetings' && page==='meeting') ||
       (branch==='practiceSlots' && page==='practice') ||
       (branch==='setlistSlots' && page==='setlist') ||
       (['songs','songSections','setlistExtras','practicePresets'].includes(branch) && ['songs','detail','practice','setlist'].includes(page));
@@ -178,7 +204,7 @@
   function slot(kind){return kind==='setlist'?state.setlistSlots[state.activeSetlist]:state.practiceSlots[state.activePractice];}
   function sum(kind){return slot(kind).entries.reduce((n,e)=>n+(kind==='practice'?e.minutes:(songById.get(e.songId)?.durationSeconds||0)),0);}
   function groupedSongs(sortMode){return KORYOSAN_TUNINGS.map(t=>({tuning:t,songs:KORYOSAN_SONGS.filter(s=>s.tuning===t).slice().sort(sorters[sortMode]||byCapo)}));}
-  function storeScroll(){for(const [key,el] of Object.entries({task:document.querySelector('[data-scroll="task"]'),detail:document.querySelector('[data-scroll="detail"]'),song:document.querySelector('[data-scroll="song"]'),practiceDraft:document.querySelector('[data-scroll="practiceDraft"]'),practiceLibrary:document.querySelector('[data-scroll="practiceLibrary"]'),setDraft:document.querySelector('[data-scroll="setDraft"]'),setLibrary:document.querySelector('[data-scroll="setLibrary"]')}))if(el)scrollPos[key]=el.scrollTop;
+  function storeScroll(){for(const [key,el] of Object.entries({task:document.querySelector('[data-scroll="task"]'),detail:document.querySelector('[data-scroll="detail"]'),song:document.querySelector('[data-scroll="song"]'),practiceDraft:document.querySelector('[data-scroll="practiceDraft"]'),practiceLibrary:document.querySelector('[data-scroll="practiceLibrary"]'),setDraft:document.querySelector('[data-scroll="setDraft"]'),setLibrary:document.querySelector('[data-scroll="setLibrary"]'),schedule:document.querySelector('[data-scroll="schedule"]'),meeting:document.querySelector('[data-scroll="meeting"]'),review:document.querySelector('[data-scroll="review"]')}))if(el)scrollPos[key]=el.scrollTop;
     const table=document.querySelector('.detail-lyrics-wrap');if(table)scrollPos.detailX=table.scrollLeft;
   }
   function restoreScroll(){Object.keys(scrollPos).forEach(key=>{const el=document.querySelector(`[data-scroll="${key}"]`);if(el)el.scrollTop=scrollPos[key];});
@@ -197,6 +223,14 @@
     if(page==='tasks'){
       title='タスク';
       right=`<button class="top-tool" data-action="task-toggle-completed" aria-pressed="${state.showCompleted}" aria-label="完了タスクを${state.showCompleted?'非表示':'表示'}" title="完了タスクを${state.showCompleted?'非表示':'表示'}">${ico(state.showCompleted?'eye':'eyeOff')}</button><button class="top-tool" data-action="task-add" aria-label="タスクを追加" title="タスクを追加">${ico('plus')}</button>`;
+    } else if(page==='schedule'){
+      title='スケジュール';right=`<button class="top-tool" data-action="schedule-toggle-past" title="過去の予定を${state.showPastSchedules?'隠す':'表示'}" aria-label="過去の予定を${state.showPastSchedules?'隠す':'表示'}">${ico(state.showPastSchedules?'eye':'eyeOff')}</button><button class="top-tool" data-action="schedule-add" title="予定を追加" aria-label="予定を追加">${ico('plus')}</button>`;
+    } else if(page==='availability'){
+      title='空き日程';right=`<button class="top-today" data-action="availability-today">今日</button>`;
+    } else if(page==='meeting'){
+      title='会議';right=`<button class="top-tool" data-action="meeting-toggle-all" title="すべて開閉" aria-label="全議題を開閉">${ico('chevron')}</button><button class="top-tool" data-action="meeting-add" title="議題を追加" aria-label="議題を追加">${ico('plus')}</button>`;
+    } else if(page==='review'){
+      title='コメントレビュー';left=`<button data-action="review-back" class="nav-back" aria-label="曲詳細へ戻る">${ico('back')}</button>`;
     } else if(page==='detail'){
       title='曲詳細';left=`<button data-action="detail-back" class="nav-back" aria-label="曲リストへ戻る">${ico('back')}</button>`;
     } else if(page==='metronome')title='メトロノーム';
@@ -204,8 +238,8 @@
     return `<header class="app-header"><div class="header-left">${left}</div><div class="header-title">${esc(title)}</div><div class="header-right">${right}</div></header>`;
   }
   function tabs(){return `<nav class="tabbar" aria-label="画面切り替え">${[
-    ['tasks','tasks','タスク'],['songs','songs','曲リスト'],['practice','clock','練習タイテ'],['setlist','list','セトリ作成'],['metronome','metronome','メトロノーム']
-  ].map(([key,iconName,name])=>`<button class="tab ${page===key||(key==='songs'&&page==='detail')?'active':''}" data-action="tab" data-page="${key}" ${page===key?'aria-current="page"':''}>${ico(iconName)}<span>${name}</span></button>`).join('')}</nav>`;}
+    ['tasks','tasks','タスク'],['songs','songs','曲リスト'],['practice','clock','練習タイテ'],['setlist','list','セトリ作成'],['metronome','metronome','メトロノーム'],['schedule','clock','スケジュール'],['availability','tasks','空き日程'],['meeting','edit','会議']
+  ].map(([key,iconName,name])=>`<button class="tab ${page===key||(key==='songs'&&['detail','review'].includes(page))?'active':''}" data-action="tab" data-page="${key}" ${page===key?'aria-current="page"':''}>${ico(iconName)}<span>${name}</span></button>`).join('')}</nav>`;}
   function songTable(songs,flat=false){return `<div class="song-rows">${songs.map(song=>`<div class="song-row ${flat?'flat':''}">
     <span class="song-title">${esc(song.title)}</span>${flat?`<span class="song-tuning">${esc(song.tuning)}</span>`:''}<span class="song-data">${capoText(song)}</span>
     <span class="song-data">${time(song.durationSeconds)}</span><span class="song-data">${song.bpm}</span>
@@ -214,14 +248,14 @@
     const flat=state.sort!=='capo';
     const all=flat?KORYOSAN_SONGS.slice().sort(sorters[state.sort]):[];
     return `<main class="page-scroll songs-page" data-scroll="song">
-      <div class="compact-page-heading"><h1>曲リスト</h1><span class="song-counter">${KORYOSAN_SONGS.length}</span></div>
-      <div class="sortbar"><div class="sortgroup" role="group" aria-label="並び替え">${[['capo','Capo順'],['name','名前順'],['duration','演奏時間順']].map(([k,t])=>`<button data-action="sort" data-sort="${k}" class="${state.sort===k?'selected':''}" aria-pressed="${state.sort===k}">${t}</button>`).join('')}</div></div>
+      <div class="compact-page-heading"><h1>曲リスト</h1></div>
+      <div class="sortbar"><div class="sortgroup" role="group" aria-label="並び替え">${[['capo','Capo順'],['duration','演奏時間順']].map(([k,t])=>`<button data-action="sort" data-sort="${k}" class="${state.sort===k?'selected':''}" aria-pressed="${state.sort===k}">${t}</button>`).join('')}</div></div>
       <div class="table-labels ${flat?'flat':''}"><span>曲名</span>${flat?'<span>チューニング</span>':''}<span>Capo</span><span>演奏時間</span><span>BPM</span><span>詳細</span></div>
-      ${flat?songTable(all,true):groupedSongs('capo').map(({tuning,songs})=>`<section class="tuning-section"><div class="tuning-heading"><span class="tuning-mark"></span><h2>${esc(tuning)}</h2><small>${songs.length}</small></div>${songTable(songs)}</section>`).join('')}
+      ${flat?songTable(all,true):groupedSongs('capo').map(({tuning,songs})=>`<section class="tuning-section"><div class="tuning-heading"><span class="tuning-mark"></span><h2>${esc(tuning)}</h2></div>${songTable(songs)}</section>`).join('')}
     </main>`;
   }
   function detailData(songId){
-    const saved=state.detailEdits[songId]||{columns:['追記メモ 1'],cells:{}};
+    const saved=state.detailEdits[songId]||{columns:['追記メモ 1'],columnIds:['memo1'],cells:{},descriptions:{},reviews:{}};
     const sections=KORYOSAN_DETAILS?.[songId]||[];
     const cells={};
     for(const [i,row] of sections.entries()){
@@ -230,7 +264,7 @@
       if(!Object.prototype.hasOwnProperty.call(values,0)&&row.note)values[0]=row.note;
       cells[i]=values;
     }
-    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells};
+    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells,descriptions:{...(saved.descriptions||{})},reviews:clone(saved.reviews||{}),noColumns:!!saved.noColumns};
   }
   function detailsPage(){
     const song=songById.get(detailSong);if(!song)return songsPage();
@@ -241,14 +275,19 @@
       ${sections.length?`<div class="detail-tools"><button type="button" class="detail-add-column" data-action="detail-add-column" aria-label="追記列を追加" title="追記列を追加" ${cols>=6?'disabled':''}>${ico('plus')}</button></div>
       <div class="detail-lyrics-wrap" role="region" aria-label="${esc(song.title)}の構成・歌詞・追記欄" tabindex="0">
         <div class="detail-lyrics-table" style="--detail-extra-count:${cols}">
-          <div class="detail-lyrics-head" role="row"><span role="columnheader">構成</span><span role="columnheader">歌詞・備考</span>${extra.columns.map((label,index)=>`<span class="detail-col-head" role="columnheader"><span class="detail-col-name">${esc(label)}</span><button class="detail-rename-button" type="button" data-action="detail-rename-column" data-column="${index}" title="列名を変更" aria-label="${esc(label)}の列名を変更">${ico('edit')}</button></span>`).join('')}</div>
-          ${sections.map((row,i)=>`<div class="detail-lyric-row" role="row"><div class="detail-structure" role="cell">${esc(row.section)}</div>
-            <div class="detail-lyric-cell" role="cell">${row.lyrics?`<div class="detail-lyric-text">${esc(row.lyrics)}</div>`:''}</div>
-            ${extra.columns.map((_,column)=>{const val=extra.cells[i]?.[column]??'';return `<div class="detail-extra-cell" role="cell"><button type="button" class="detail-edit-button" data-action="detail-edit" data-row="${i}" data-column="${column}" aria-label="${esc(row.section)}、${esc(extra.columns[column])}を編集" title="編集">${ico('edit')}</button>${val?`<div class="detail-extra-content">${esc(val)}</div>`:''}</div>`;}).join('')}
-          </div>`).join('')}
+          <div class="detail-lyrics-head detail-header-v6" role="row">
+            <span class="detail-fixed-section" role="columnheader">構成</span><span class="detail-fixed-lyrics" role="columnheader">歌詞</span>
+            ${extra.columns.map((label,index)=>{const id=extra.columnIds[index];return `<div class="detail-memo-head" role="columnheader"><div class="detail-memo-controls"><button type="button" data-action="detail-review" data-column-id="${esc(id)}" title="コメントレビュー" aria-label="${esc(label)}のコメントレビュー">👀</button><button type="button" data-action="detail-delete-column" data-column="${index}" title="この列を削除" aria-label="${esc(label)}を削除">${ico('trash')}</button></div><div class="detail-col-head"><span class="detail-col-name">${esc(label)}</span><button class="detail-rename-button" type="button" data-action="detail-rename-column" data-column="${index}" title="列名を変更" aria-label="${esc(label)}の列名を変更">${ico('edit')}</button></div><textarea data-detail-desc="${esc(id)}" rows="1" maxlength="2000" placeholder="説明・リンクなど" aria-label="${esc(label)}の説明">${esc(extra.descriptions[id]||'')}</textarea></div>`;}).join('')}
+          </div>
+          ${sections.map((row,i)=>`<div class="detail-lyric-row" role="row"><div class="detail-structure" role="cell">${esc(row.section)}</div><div class="detail-lyric-cell" role="cell">${row.lyrics?`<div class="detail-lyric-text">${esc(row.lyrics)}</div>`:''}</div>${extra.columns.map((_,column)=>{const val=extra.cells[i]?.[column]??'';return `<div class="detail-extra-cell" role="cell"><button type="button" class="detail-edit-button" data-action="detail-edit" data-row="${i}" data-column="${column}" aria-label="${esc(row.section)}、${esc(extra.columns[column])}を編集" title="編集">${ico('edit')}</button>${val?`<div class="detail-extra-content">${esc(val)}</div>`:''}</div>`;}).join('')}</div>`).join('')}
         </div>
       </div>`:'<div class="detail-placeholder">—</div>'}
     </main>`;
+  }
+  function reviewPage(){
+    const song=songById.get(detailSong);const data=detailData(detailSong);const index=data.columnIds.indexOf(reviewColumnId);if(!song||index<0)return detailsPage();
+    const sections=KORYOSAN_DETAILS?.[detailSong]||[];
+    return `<main class="page-scroll review-page" data-scroll="review"><h1>${esc(song.title)} ／ ${esc(data.columns[index])}</h1><div class="review-intro">各区間の追記メモとコメントを確認できます。コメントはFirebaseで共有されます。</div><div class="review-list">${sections.map((row,i)=>`<section class="review-item"><h2>${esc(row.section)}</h2><div class="review-memo">${esc(data.cells[i]?.[index]||'（追記メモなし）')}</div><label>レビューコメント<textarea data-review-row="${i}" data-review-col="${esc(reviewColumnId)}" rows="2" maxlength="3000" placeholder="コメントを入力">${esc(data.reviews[reviewColumnId]?.[i]||'')}</textarea></label></section>`).join('')}</div></main>`;
   }
   function openDetailEdit(row,column){
     if(page!=='detail'||!detailSong)return;
@@ -284,7 +323,7 @@
     const data=detailData(detailSong);
     if(data.columns.length>=6){toast('最大6列です');return;}
     const n=data.columns.length+1;
-    data.columns.unshift(`追記メモ ${n}`);
+    data.noColumns=false;data.columns.unshift(`追記メモ ${n}`);
     data.columnIds.unshift(`memo_${guid().replace(/[^a-zA-Z0-9_-]/g,'')}`);
     for(const row of Object.values(data.cells))row.unshift('');
     state.detailEdits[detailSong]=data;save();render();
@@ -313,45 +352,48 @@
       }
       return a.deadline.localeCompare(b.deadline)||naturalCompare(a.name,b.name);
     };
-    return state.tasks.filter(t=>state.showCompleted||t.status!=='完了').slice().sort(compare);
+    return state.tasks.filter(t=>state.showCompleted||t.status!=='完了').slice().sort((a,b)=>{
+      if(!a.name&&!b.name)return (b.createdAt||0)-(a.createdAt||0);
+      if(!a.name)return -1;if(!b.name)return 1;return compare(a,b);
+    });
   }
   function tasksPage(){
     const tasks=sortedTasks();
     return `<main class="page-scroll tasks-page" data-scroll="task">
-      <div class="compact-page-heading"><h1>タスク</h1><span class="song-counter">${state.tasks.length}</span></div>
-      <div class="task-sortbar"><div class="sortgroup" role="group" aria-label="タスクの並び替え">${[['deadline','期限順'],['member','担当者順']].map(([k,label])=>`<button data-action="task-sort" data-sort="${k}" aria-pressed="${state.taskSort===k}" class="${state.taskSort===k?'selected':''}">${label}</button>`).join('')}</div><div class="task-status-count">${state.tasks.filter(t=>t.status!=='完了').length} / ${state.tasks.length}</div></div>
-      <div class="tasks-table" role="region" aria-label="タスク一覧・横スクロール可能" tabindex="0"><div class="tasks-grid"><div class="task-table-header" role="row"><span>分類</span><span>タスク名</span><span>ステータス</span><span>期限</span><span>担当</span><span>備考</span></div>
-      ${tasks.map(task=>`<button class="task-table-row ${task.status==='完了'?'is-done':''}" type="button" role="row" data-action="task-edit" data-id="${esc(task.id)}" aria-label="${esc(task.name)}を編集">
-        <span class="task-col task-category">${esc(task.category)}</span>
-        <span class="task-col task-name">${esc(task.name)}</span>
-        <span class="task-col"><span class="task-status ${taskStatusClass(task.status)}">${esc(task.status)}</span></span>
+      <div class="compact-page-heading"><h1>タスク</h1></div>
+      <div class="task-sortbar"><div class="sortgroup" role="group" aria-label="タスクの並び替え">${[['deadline','期限順'],['member','担当者順']].map(([k,label])=>`<button data-action="task-sort" data-sort="${k}" aria-pressed="${state.taskSort===k}" class="${state.taskSort===k?'selected':''}">${label}</button>`).join('')}</div></div>
+      <div class="tasks-table" role="region" aria-label="タスク一覧"><div class="tasks-grid"><div class="task-table-header" role="row"><span>分類</span><span>タスク名</span><span>ステータス</span><span>期限</span><span>担当</span><span>場所</span><span>備考</span></div>
+      ${tasks.map(task=>`<button class="task-table-row ${task.status==='完了'?'is-done':''} ${task.category==='🎸【アレンジ】'?'task-is-arrange':task.category==='✒️【作業】'?'task-is-work':'task-is-blank'} ${!task.name?'task-is-draft':''}" type="button" role="row" data-action="task-edit" data-id="${esc(task.id)}" aria-label="${esc(task.name)}を編集">
+        <span class="task-col task-category">${esc(task.category||'未設定')}</span>
+        <span class="task-col task-name">${esc(task.name||'タスク名未設定')}</span>
+        <span class="task-col"><span class="task-status ${taskStatusClass(task.status)}">${esc(task.status||'未設定')}</span></span>
         <span class="task-col task-deadline">${esc(task.deadline)}</span><span class="task-col task-members">${task.members.length?esc(task.members.join(' ')):'—'}</span>
-        <span class="task-col task-notes">${task.notes?esc(task.notes):'—'}</span></button>`).join('')}</div></div>
+        <span class="task-col task-place">${esc(task.place||'—')}</span><span class="task-col task-notes">${task.notes?esc(task.notes):'—'}</span></button>`).join('')}</div></div>
     </main>`;
   }
   function taskOption(value,selected){return `<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(value)}</option>`;}
   function openTask(id=null){
     taskEditingId=id;
     const original=state.tasks.find(t=>t.id===id);
-    const t=original || {category:TASK_CATEGORIES[0],name:'',status:TASK_STATUSES[0],deadline:localDate(),members:[],notes:''};
+    const t=original || {category:'',name:'',status:'',deadline:localDate(),members:[],notes:'',place:''};
     modalOpen=true;
     $modal.innerHTML=`<div class="overlay task-overlay" data-action="overlay"><section class="dialog task-dialog" role="dialog" aria-modal="true" aria-label="${original?'タスクを編集':'タスクを追加'}">
       <div class="dialog-head"><h2>${original?'タスクを編集':'タスクを追加'}</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div>
-      <form id="task-form" class="task-form"><label>分類<select name="category">${TASK_CATEGORIES.map(x=>taskOption(x,t.category)).join('')}</select></label>
+      <form id="task-form" class="task-form"><label>分類<select name="category">${taskOption('','')}${TASK_CATEGORIES.map(x=>taskOption(x,t.category)).join('')}</select></label>
         <label>タスク名<input name="name" type="text" maxlength="200" required placeholder="タスク名を入力" value="${esc(t.name)}"></label>
-        <label>ステータス<select name="status">${TASK_STATUSES.map(x=>taskOption(x,t.status)).join('')}</select></label>
+        <label>ステータス<select name="status">${taskOption('','')}${TASK_STATUSES.map(x=>taskOption(x,t.status)).join('')}</select></label>
         <label>期限<input name="deadline" type="date" required value="${esc(t.deadline)}"></label>
         <fieldset><legend>担当（複数選択可）</legend><div class="task-member-options">${TASK_MEMBERS.map(x=>`<label><input type="checkbox" name="members" value="${x}" ${t.members.includes(x)?'checked':''}><span>${x}</span></label>`).join('')}</div></fieldset>
-        <label>備考<textarea name="notes" rows="4" maxlength="4000" placeholder="補足情報を入力">${esc(t.notes)}</textarea></label>
+        <label>場所<input name="place" type="text" maxlength="400" value="${esc(t.place||'')}" placeholder="場所（任意）"></label><label>備考<textarea name="notes" rows="4" maxlength="4000" placeholder="補足情報を入力">${esc(t.notes)}</textarea></label>
         <div class="task-form-actions">${original?`<button class="task-delete" type="button" data-action="task-delete" data-id="${esc(id)}">削除</button>`:''}<button class="task-cancel" type="button" data-action="close-dialog">キャンセル</button><button class="task-submit" type="submit">${original?'変更を保存':'追加する'}</button></div>
       </form></section></div>`;
     // スマートフォンで新規追加時にキーボードを自動表示しない。
   }
   function submitTask(form){
     const data=new FormData(form),name=String(data.get('name')||'').trim(),deadline=String(data.get('deadline')||'');
-    if(!name){toast('タスク名を入力してください');return;}
+    
     if(!/^\d{4}-\d{2}-\d{2}$/.test(deadline)){toast('期限をカレンダーから選択してください');return;}
-    const task={id:taskEditingId||guid(),category:TASK_CATEGORIES.includes(data.get('category'))?data.get('category'):TASK_CATEGORIES[0],name:name.slice(0,200),status:TASK_STATUSES.includes(data.get('status'))?data.get('status'):TASK_STATUSES[0],deadline,members:TASK_MEMBERS.filter(x=>data.getAll('members').includes(x)),notes:String(data.get('notes')||'').slice(0,4000)};
+    const task={id:taskEditingId||guid(),category:TASK_CATEGORIES.includes(data.get('category'))?data.get('category'):'',name:name.slice(0,200),status:TASK_STATUSES.includes(data.get('status'))?data.get('status'):'',deadline,members:TASK_MEMBERS.filter(x=>data.getAll('members').includes(x)),notes:String(data.get('notes')||'').slice(0,4000),place:String(data.get('place')||'').slice(0,400),createdAt:state.tasks.find(t=>t.id===taskEditingId)?.createdAt||Date.now()};
     const idx=state.tasks.findIndex(x=>x.id===task.id);if(idx>=0)state.tasks[idx]=task;else state.tasks.push(task);
     save();closeData();render();toast(idx>=0?'タスクを更新しました':'タスクを追加しました');
   }
@@ -368,7 +410,7 @@
   function setEntry(item,index){const song=songById.get(item.songId);if(!song)return '';
     return `<article class="draft-row ${song.tuning==='DADGAD'?'tuning-dadgad':song.tuning?'tuning-regular':'tuning-other'}" data-entry="${esc(item.id)}"><div class="draft-top"><button class="drag-handle" data-handle="true" aria-label="${esc(song.title)}をドラッグして並べ替え" title="ドラッグして並べ替え">⠿</button><span class="draft-index">${index+1}.</span><strong>${esc(song.title)}</strong><button class="remove" data-action="remove" data-kind="setlist" data-id="${esc(item.id)}" aria-label="${esc(song.title)}を削除">×</button></div><div class="draft-meta">${song.tuning?esc(song.tuning)+' · ':''}${song.capo==null?'Capoなし':'Capo '+song.capo} · ${time(song.durationSeconds)}${song.bpm?' · '+song.bpm+' BPM':''}</div></article>`;
   }
-  function pickGroup(tuning,songs,extra=false){return `<section class="pick-group ${extra?'tuning-other':tuning==='DADGAD'?'tuning-dadgad':'tuning-regular'}"><h3>${esc(tuning)} <small>${songs.length}項目</small></h3>${songs.map(song=>`<button class="pick-row" data-action="add-song" data-id="${song.id}"><span><strong>${esc(song.title)}</strong><small>${extra?time(song.durationSeconds):`${song.capo==null?'Capoなし':'Capo '+song.capo} · ${time(song.durationSeconds)} · ${song.bpm} BPM`}</small></span><b>＋</b></button>`).join('')}</section>`;}
+  function pickGroup(tuning,songs,extra=false){return `<section class="pick-group ${extra?'tuning-other':tuning==='DADGAD'?'tuning-dadgad':'tuning-regular'}"><h3>${esc(tuning)}</h3>${songs.map(song=>`<button class="pick-row" data-action="add-song" data-id="${song.id}"><span><strong>${esc(song.title)}</strong><small>${extra?time(song.durationSeconds):`${song.capo==null?'Capoなし':'Capo '+song.capo} · ${time(song.durationSeconds)} · ${song.bpm} BPM`}</small></span><b>＋</b></button>`).join('')}</section>`;}
   function setlistPage(){const s=slot('setlist');return `${slotIntro('setlist')}${timebar('setlist')}
     <div class="columns"><section class="column"><header>SETLIST <span>${s.entries.length}項目 · 使用 ${time(sum('setlist'))}</span></header><div class="column-scroll" data-scroll="setDraft">${s.entries.length?s.entries.map(setEntry).join(''):''}</div></section><div class="vertical-rule"></div><section class="column"><header>持ち曲（タップで追加）</header><div class="column-scroll" data-scroll="setLibrary">${groupedSongs('capo').map(g=>pickGroup(g.tuning,g.songs)).join('')}${pickGroup('その他',KORYOSAN_EXTRA,true)}</div></section></div>`;}
   const optionsForMinutes=value=>Array.from({length:48},(_,i)=>5*(i+1)).map(v=>`<option value="${v}" ${v===value?'selected':''}>${v}分</option>`).join('');
@@ -382,9 +424,118 @@
   function practiceEntries(entries){let elapsed=0;return entries.map((item,i)=>{const row=practiceEntry(item,i,elapsed);elapsed+=item.minutes;return row;}).join('');}
   function practicePage(){const s=slot('practice');return `${slotIntro('practice')}${timebar('practice')}
     <div class="columns practice-columns"><section class="column"><header>タイムテーブル <span>${s.entries.length} · ${sum('practice')}分</span></header><div class="column-scroll" data-scroll="practiceDraft">${practiceEntries(s.entries)}</div></section><div class="vertical-rule"></div><section class="column"><header>メニュー</header><div class="column-scroll practice-menu" data-scroll="practiceLibrary">${KORYOSAN_PRACTICE.map(item=>`<button class="pick-row practice-pick" data-action="add-practice" data-id="${item.id}"><span><strong>${esc(item.title)}</strong><small>${item.minutes}分</small></span><b>＋</b></button>`).join('')}</div></section></div>`;}
+  // 校了さん v6: スケジュール・空き日程・会議（Firebase共有）
+  const NEW_CATEGORIES=[{id:'',label:'未設定'},{id:'practice',label:'💪練習'},{id:'live',label:'🎸ライブ'},{id:'other',label:'🥟その他'}];
+  const DAY_LABELS=['日','月','火','水','木','金','土'];
+  const fiveMinuteTimes=Array.from({length:288},(_,i)=>`${pad(Math.floor(i/12))}:${pad((i%12)*5)}`);
+  const dateOfKey=key=>new Date(`${key}T12:00:00`);
+  const dateKey=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const addDays=(key,n)=>{const d=dateOfKey(key);d.setDate(d.getDate()+n);return dateKey(d);};
+  const meetingById=id=>state.meetings.find(m=>m.id===id);
+  function resizeOne(el){
+    if(el?.tagName!=='TEXTAREA')return;
+    el.style.height='auto';el.style.height=`${Math.max(25,el.scrollHeight)}px`;
+  }
+  function resizeAutos(node){node?.querySelectorAll('textarea:not(.task-form textarea)').forEach(resizeOne);}
+  function newTimeOptions(selected){return `<option value="" ${!selected?'selected':''}>--:--</option>`+fiveMinuteTimes.map(t=>`<option value="${t}" ${t===selected?'selected':''}>${t}</option>`).join('');}
+  function scheduleCard(s){
+    const today=localDate(),past=s.date<today;
+    return `<article class="k6-schedule ${s.category?'k6-cat-'+s.category:'k6-cat-none'} ${past?'k6-past':''}" data-schedule-id="${esc(s.id)}">
+      <div class="k6-schedule-info">
+        <label><small>項目</small><select data-schedule-field="category" aria-label="予定の種類">${NEW_CATEGORIES.map(c=>`<option value="${c.id}" ${c.id===s.category?'selected':''}>${c.label}</option>`).join('')}</select></label>
+        <label><small>日付</small><input data-schedule-field="date" type="date" value="${esc(s.date)}" aria-label="予定の日付"></label>
+        <label class="k6-time-field"><small>時間</small><span class="k6-time-selects"><select data-schedule-field="start" aria-label="開始時刻">${newTimeOptions(s.start)}</select><span>〜</span><select data-schedule-field="end" aria-label="終了時刻">${newTimeOptions(s.end)}</select></span></label>
+        <label><small>場所</small><input data-schedule-field="place" type="text" maxlength="400" value="${esc(s.place)}" placeholder="未設定" aria-label="場所"></label>
+      </div>
+      <div class="k6-schedule-note"><textarea data-schedule-field="notes" rows="1" maxlength="5000" placeholder="備考" aria-label="予定の備考">${esc(s.notes)}</textarea><button class="k6-remove" data-action="schedule-delete" data-id="${esc(s.id)}" title="予定を削除" aria-label="予定を削除">${ico('trash')}</button></div>
+    </article>`;
+  }
+  function schedulePage(){
+    const future=state.schedules.filter(s=>s.date>=localDate());
+    const past=state.schedules.filter(s=>s.date<localDate());
+    const sort=(xs)=>xs.sort((a,b)=>{
+      const draft=a.category===''&&a.place===''&&a.start===''&&a.end===''&&a.notes==='';
+      const draftB=b.category===''&&b.place===''&&b.start===''&&b.end===''&&b.notes==='';
+      if(draft!==draftB)return draft?-1:1;
+      return a.date.localeCompare(b.date)||a.start.localeCompare(b.start)||(b.createdAt||0)-(a.createdAt||0);
+    });
+    const entries=[...sort(future),...(state.showPastSchedules?sort(past):[])];
+    return `<main class="page-scroll k6-page k6-schedule-page" data-scroll="schedule"><div class="k6-content">${entries.length?entries.map(scheduleCard).join(''):'<div class="k6-empty">予定はありません</div>'}</div></main>`;
+  }
+  // 日本の国民の祝日（2000〜2099年を主対象、振替休日・国民の休日にも対応）
+  const holidayMemo=new Map();
+  const monNth=(year,month,n)=>{let d=new Date(year,month-1,1,12);return `${year}-${pad(month)}-${pad(1+(8-d.getDay())%7+(n-1)*7)}`;};
+  function holidaysOf(year){
+    if(holidayMemo.has(year))return holidayMemo.get(year);
+    const days=new Set(),add=(m,d)=>days.add(`${year}-${pad(m)}-${pad(d)}`);
+    add(1,1);add(2,11);if(year>=2020)add(2,23);
+    add(4,29);add(5,3);add(5,4);add(5,5);add(8,11);add(11,3);add(11,23);
+    add(3,Math.floor(20.8431+.242194*(year-1980)-Math.floor((year-1980)/4)));
+    add(9,Math.floor(23.2488+.242194*(year-1980)-Math.floor((year-1980)/4)));
+    days.add(monNth(year,1,2));days.add(monNth(year,9,3));
+    if(year===2020||year===2021){
+      days.delete(`${year}-08-11`);
+      add(8,year===2020?10:8);
+      add(7,year===2020?23:22);
+      add(7,year===2020?24:23);
+    }else{days.add(monNth(year,7,3));days.add(monNth(year,10,2));}
+    if(year<2000){days.delete(`${year}-02-23`);}
+    if(year>=1985){const arr=[...days];for(const k of arr){const mid=addDays(k,1),after=addDays(k,2);if(days.has(after)&&dateOfKey(mid).getDay()!==0&&!days.has(mid))days.add(mid);}}
+    const sunday=[...days].filter(k=>dateOfKey(k).getDay()===0).sort();
+    for(const date of sunday){let sub=addDays(date,1);while(days.has(sub))sub=addDays(sub,1);days.add(sub);}
+    holidayMemo.set(year,days);return days;
+  }
+  function availableDay(key){
+    const d=dateOfKey(key),wd=d.getDay(),holiday=holidaysOf(d.getFullYear()).has(key);
+    const vals=state.availability[key]||{};
+    return `<div class="k6-avail-row ${key===localDate()?'k6-today':''}" data-day="${key}">
+      <div class="k6-date">${d.getMonth()+1}/${d.getDate()}<small>${d.getFullYear()}</small></div>
+      <div class="k6-day ${holiday||wd===0?'k6-red':wd===6?'k6-blue':''}">${DAY_LABELS[wd]}${holiday?'祝':''}</div>
+      ${TASK_MEMBERS.map(m=>`<label class="k6-member"><textarea data-avail-day="${key}" data-member="${m}" rows="1" maxlength="400" placeholder="" aria-label="${key} ${m}の予定">${esc(vals[m]||'')}</textarea></label>`).join('')}
+    </div>`;
+  }
+  function availabilityPage(){return `<div class="k6-availability"><div class="k6-avail-head"><span>日付</span><span>曜日</span>${TASK_MEMBERS.map(m=>`<span>${m}</span>`).join('')}</div><div id="avail-scroll" class="k6-avail-scroll"><div id="avail-days"></div></div></div>`;}
+  function buildAvailability(focusDay,retain=false){
+    const scroll=document.getElementById('avail-scroll'),parent=document.getElementById('avail-days');if(!scroll||!parent)return;
+    const first=addDays(focusDay,-40),last=addDays(focusDay,150),rows=[];
+    for(let d=first;d<=last;d=addDays(d,1))rows.push(availableDay(d));
+    parent.innerHTML=rows.join('');availabilityRange={first,last,anchor:focusDay,expanding:false};resizeAutos(parent);
+    requestAnimationFrame(()=>{
+      const element=Array.from(parent.children).find(x=>x.dataset.day===focusDay);
+      if(element)scroll.scrollTop=Math.max(0,element.offsetTop-parent.offsetTop);
+    });
+  }
+  function mountAvailability(day){buildAvailability(day);}
+  function extendAvailability(side){
+    const box=document.getElementById('avail-scroll'),parent=document.getElementById('avail-days');
+    if(!box||!parent||!availabilityRange||availabilityRange.expanding)return;
+    availabilityRange.expanding=true;
+    const {first,last}=availabilityRange,arr=[];
+    if(side==='past'){
+      const target=addDays(first,-55),oldHeight=parent.scrollHeight;
+      for(let day=target;day<first;day=addDays(day,1))arr.push(availableDay(day));
+      parent.insertAdjacentHTML('afterbegin',arr.join(''));availabilityRange.first=target;
+      box.scrollTop+=parent.scrollHeight-oldHeight;
+    }else{
+      const target=addDays(last,95);
+      for(let day=addDays(last,1);day<=target;day=addDays(day,1))arr.push(availableDay(day));
+      parent.insertAdjacentHTML('beforeend',arr.join(''));availabilityRange.last=target;
+    }
+    resizeAutos(parent);availabilityRange.expanding=false;
+  }
+  function meetingCard(m){
+    const open=!meetingCollapsed.has(m.id);
+    return `<article class="k6-meeting" data-meeting-id="${esc(m.id)}"><div class="k6-meeting-head">
+      <button class="k6-expand ${open?'open':''}" data-action="meeting-expand" data-id="${esc(m.id)}" aria-expanded="${open}" title="${open?'閉じる':'開く'}">${ico('chevron')}</button>
+      <input type="text" data-meeting-title="${esc(m.id)}" maxlength="300" value="${esc(m.title)}" placeholder="タイトル未設定" aria-label="会議タイトル">
+      <button class="k6-remove" data-action="meeting-delete" data-id="${esc(m.id)}" title="議題を削除" aria-label="議題を削除">${ico('trash')}</button>
+    </div>${open?`<div class="k6-meeting-body">${m.rows.map(row=>`<div class="k6-meeting-row"><textarea data-meeting-row="${esc(m.id)}" data-row-id="${esc(row.id)}" rows="1" maxlength="10000" placeholder="自由記述" aria-label="議題内容">${esc(row.text)}</textarea><button class="k6-remove" data-action="meeting-delete-row" data-id="${esc(m.id)}" data-row-id="${esc(row.id)}" title="この行を削除" aria-label="この行を削除">${ico('trash')}</button></div>`).join('')}<div class="k6-meeting-footer"><button class="k6-meeting-plus" data-action="meeting-add-row" data-id="${esc(m.id)}" aria-label="記述欄を追加" title="記述欄を追加">${ico('plus')}</button></div></div>`:''}</article>`;
+  }
+  function meetingPage(){return `<main class="page-scroll k6-page k6-meeting-page" data-scroll="meeting"><div class="k6-content">${state.meetings.length?state.meetings.map(meetingCard).join(''):'<div class="k6-empty">議題はありません</div>'}</div></main>`;}
+
   function render(){storeScroll();window.KoryoMetronome?.unmount();
-    $app.innerHTML=`${header()}<div class="app-content">${page==='tasks'?tasksPage():page==='songs'?songsPage():page==='detail'?detailsPage():page==='setlist'?setlistPage():page==='practice'?practicePage():'<div id="metronome-root"></div>'}</div>${tabs()}`;
-    restoreScroll();if(page==='metronome')window.KoryoMetronome?.mount(document.getElementById('metronome-root'));
+    $app.innerHTML=`${header()}<div class="app-content">${page==='tasks'?tasksPage():page==='songs'?songsPage():page==='detail'?detailsPage():page==='setlist'?setlistPage():page==='practice'?practicePage():page==='schedule'?schedulePage():page==='availability'?availabilityPage():page==='meeting'?meetingPage():page==='review'?reviewPage():'<div id="metronome-root"></div>'}</div>${tabs()}`;
+    restoreScroll();if(page==='availability'){if(!availabilityRange)mountAvailability(localDate());else buildAvailability(availabilityRange.anchor,true);}resizeAutos($app);if(page==='metronome')window.KoryoMetronome?.mount(document.getElementById('metronome-root'));
     document.title=`校了さん${page==='detail'?'｜楽譜・詳細':''}`;
   }
   function updateTime(){
@@ -398,12 +549,15 @@
     }
   }
   function moveEntry(kind,id,targetId){const list=slot(kind).entries;const from=list.findIndex(e=>e.id===id),to=list.findIndex(e=>e.id===targetId);if(from<0||to<0||from===to)return;const [entry]=list.splice(from,1);list.splice(to,0,entry);save();render();}
-  function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細の追記メモ、3つの練習タイテ、3つのセトリ、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
+  function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細・レビュー、練習タイテ、セトリ、スケジュール、空き日程、会議、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
   function closeData(){modalOpen=false;$modal.innerHTML='';setTimeout(flushRemote,0);}
-  function downloadBackup(){const obj={app:'Koryosan_PWA',version:5,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
+  function downloadBackup(){const obj={app:'Koryosan_PWA',version:6,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
   async function readBackup(file){if(!file)return;if(file.size>8*1024*1024){toast('8MB以下のファイルを指定してください');return;}try{
       const obj=JSON.parse(await file.text());if(obj.app!=='Koryosan_PWA'||!obj.state)throw Error('校了さん用のバックアップを選んでください');
-      const nextState=validate(obj.state);if(!confirm('このバックアップの内容を3人の共有データベースに反映します。既存の項目を上書き・削除する可能性があります。実行しますか？'))return;
+      const nextState=validate(obj.state);
+      // 古いバックアップには新画面のデータがないため、復元時に誤って消さない。
+      for(const key of ['schedules','availability','meetings'])if(!Object.prototype.hasOwnProperty.call(obj.state,key))nextState[key]=clone(state[key]);
+      if(!confirm('このバックアップの内容を3人の共有データベースに反映します。既存の項目を上書き・削除する可能性があります。実行しますか？'))return;
       if(obj.metronome)window.KoryoMetronome?.restore(obj.metronome);
       state=nextState;save();closeData();render();toast('バックアップを読み込みました');
     }catch(e){console.error(e);alert('読み込めませんでした：'+e.message);}}
@@ -441,11 +595,31 @@
     if(what==='detail-edit'){openDetailEdit(Number(el.dataset.row),Number(el.dataset.column));return;}
     if(what==='detail-add-column'){addDetailColumn();return;}
     if(what==='detail-rename-column'){openColumnRename(Number(el.dataset.column));return;}
-    if(what==='task-add'){openTask();return;}
+    if(what==='detail-review'){reviewColumnId=el.dataset.columnId;page='review';scrollPos.review=0;render();return;}
+    if(what==='review-back'){page='detail';render();return;}
+    if(what==='detail-delete-column'){
+      const index=Number(el.dataset.column),data=detailData(detailSong),id=data.columnIds[index];
+      if(!id||!confirm(`「${data.columns[index]}」を削除しますか？ この列のメモ・レビューも削除されます。`))return;
+      data.columns.splice(index,1);data.columnIds.splice(index,1);delete data.descriptions[id];delete data.reviews[id];
+      for(const row of Object.values(data.cells))row.splice(index,1);
+      if(!data.columns.length){data.noColumns=true;data.cells={};data.descriptions={};data.reviews={};}
+      state.detailEdits[detailSong]=data;save();render();return;
+    }
+    if(what==='task-add'){state.tasks.unshift({id:guid(),category:'',name:'',status:'',deadline:localDate(),members:[],notes:'',place:'',createdAt:Date.now()});scrollPos.task=0;save();render();return;}
     if(what==='task-sort'){state.taskSort=el.dataset.sort==='member'?'member':'deadline';save();render();return;}
     if(what==='task-toggle-completed'){state.showCompleted=!state.showCompleted;save();render();return;}
     if(what==='task-edit'){openTask(el.dataset.id);return;}
     if(what==='task-delete'){const id=el.dataset.id;const task=state.tasks.find(t=>t.id===id);if(!task||!confirm(`「${task.name}」を削除しますか？`))return;state.tasks=state.tasks.filter(t=>t.id!==id);save();closeData();render();toast('タスクを削除しました');return;}
+    if(what==='schedule-add'){state.schedules.unshift({id:guid(),category:'',date:localDate(),start:'',end:'',place:'',notes:'',createdAt:Date.now()});scrollPos.schedule=0;save();render();return;}
+    if(what==='schedule-toggle-past'){state.showPastSchedules=!state.showPastSchedules;save();render();return;}
+    if(what==='schedule-delete'){if(!confirm('削除しますか？'))return;state.schedules=state.schedules.filter(x=>x.id!==el.dataset.id);save();render();return;}
+    if(what==='availability-today'){mountAvailability(localDate());return;}
+    if(what==='meeting-add'){const id=guid();state.meetings.unshift({id,title:'',createdAt:Date.now(),rows:[{id:guid(),text:''}]});meetingCollapsed.delete(id);scrollPos.meeting=0;save();render();return;}
+    if(what==='meeting-delete'){if(!confirm('削除しますか？'))return;state.meetings=state.meetings.filter(x=>x.id!==el.dataset.id);save();render();return;}
+    if(what==='meeting-expand'){meetingCollapsed.has(el.dataset.id)?meetingCollapsed.delete(el.dataset.id):meetingCollapsed.add(el.dataset.id);render();return;}
+    if(what==='meeting-toggle-all'){const allOpen=state.meetings.every(x=>!meetingCollapsed.has(x.id));for(const item of state.meetings){if(allOpen)meetingCollapsed.add(item.id);else meetingCollapsed.delete(item.id);}render();return;}
+    if(what==='meeting-add-row'){const item=state.meetings.find(m=>m.id===el.dataset.id);if(!item)return;item.rows.push({id:guid(),text:''});meetingCollapsed.delete(item.id);save();render();return;}
+    if(what==='meeting-delete-row'){if(!confirm('この行を削除しますか？'))return;const item=state.meetings.find(m=>m.id===el.dataset.id);if(!item)return;item.rows=item.rows.filter(r=>r.id!==el.dataset.rowId);save();render();return;}
     if(what==='sort'){state.sort=el.dataset.sort;save();render();return;}
     if(what==='slot-rename'){openSlotRename(el.dataset.kind,Number(el.dataset.index));return;}
     if(what==='slot'){const idx=Number(el.dataset.index);if(idx<0||idx>=SLOTS)return;if(el.dataset.kind==='practice')state.activePractice=idx;else state.activeSetlist=idx;save();render();return;}
@@ -466,11 +640,31 @@
   document.addEventListener('submit',e=>{if(e.target.id==='task-form'){e.preventDefault();submitTask(e.target);}else if(e.target.id==='detail-edit-form'){e.preventDefault();submitDetailEdit(e.target);}else if(e.target.id==='detail-rename-form'){e.preventDefault();submitColumnRename(e.target);}else if(e.target.id==='slot-rename-form'){e.preventDefault();submitSlotRename(e.target);}});
   document.addEventListener('input',e=>{
     const el=e.target;
+    if(el.dataset.scheduleField){
+      const s=state.schedules.find(x=>x.id===el.closest('[data-schedule-id]')?.dataset.scheduleId);
+      if(s&&['place','notes'].includes(el.dataset.scheduleField)){s[el.dataset.scheduleField]=el.value.slice(0,el.dataset.scheduleField==='notes'?5000:400);save();resizeOne(el);}return;
+    }
+    if(el.dataset.availDay&&TASK_MEMBERS.includes(el.dataset.member)){
+      const day=el.dataset.availDay,m=el.dataset.member;
+      const row=state.availability[day]||(state.availability[day]={});if(el.value)row[m]=el.value.slice(0,400);else delete row[m];
+      if(!Object.keys(row).length)delete state.availability[day];save();resizeOne(el);return;
+    }
+    if(el.dataset.meetingTitle){const m=state.meetings.find(x=>x.id===el.dataset.meetingTitle);if(m){m.title=el.value.slice(0,300);save();}return;}
+    if(el.dataset.meetingRow){const m=state.meetings.find(x=>x.id===el.dataset.meetingRow),r=m?.rows.find(x=>x.id===el.dataset.rowId);if(r){r.text=el.value.slice(0,10000);save();resizeOne(el);}return;}
+    if(el.dataset.reviewRow!==undefined){const data=detailData(detailSong),id=el.dataset.reviewCol,row=Number(el.dataset.reviewRow);if(!data.columnIds.includes(id)||!Number.isInteger(row))return;data.reviews[id]??={};data.reviews[id][row]=el.value.slice(0,3000);state.detailEdits[detailSong]=data;save();resizeOne(el);return;}
     if(el.dataset.input==='note'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);if(entry){entry.note=el.value.slice(0,3000);save();}return;}
     if(el.id==='planned-minutes'){const num=Number(el.value);if(el.value!==''&&Number.isInteger(num)&&num>=0&&num<=999){slot(page==='practice'?'practice':'setlist').minutes=num;save();updateTime();}}
   });
   document.addEventListener('change',e=>{
     const el=e.target;
+    if(el.dataset.scheduleField){const s=state.schedules.find(x=>x.id===el.closest('[data-schedule-id]')?.dataset.scheduleId);if(!s)return;
+      const k=el.dataset.scheduleField;
+      if(k==='category'&&['','practice','live','other'].includes(el.value))s.category=el.value;
+      if(k==='date'&&/^\d{4}-\d{2}-\d{2}$/.test(el.value))s.date=el.value;
+      if((k==='start'||k==='end')&&(el.value===''||minutesOf(el.value)!==null&&minutesOf(el.value)%5===0))s[k]=el.value;
+      save();if(['date','category'].includes(k))render();return;
+    }
+    if(el.dataset.detailDesc){const data=detailData(detailSong);if(data.columnIds.includes(el.dataset.detailDesc)){data.descriptions[el.dataset.detailDesc]=el.value.slice(0,2000);state.detailEdits[detailSong]=data;save();}return;}
     if(el.dataset.select==='entry-minutes'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);const n=Number(el.value);if(entry&&Number.isInteger(n)&&n>=5&&n<=240&&n%5===0){entry.minutes=n;save();updateTime();}return;}
     if(['practice-start','practice-end'].includes(el.id)){
       const n=minutesOf(el.value);if(n===null){el.value=slot('practice')[el.id==='practice-start'?'startTime':'endTime'];return;}
@@ -480,6 +674,9 @@
     if(el.id==='backup-input'){void readBackup(el.files?.[0]);el.value='';}
   });
   document.addEventListener('focusout',e=>{if(e.target.id==='planned-minutes')e.target.value=slot('setlist').minutes;setTimeout(flushRemote,0);});
+  document.addEventListener('scroll',e=>{const box=e.target;if(box.id!=='avail-scroll'||!availabilityRange||availabilityRange.expanding)return;
+    if(box.scrollTop<170)extendAvailability('past');else if(box.scrollTop+box.clientHeight>box.scrollHeight-450)extendAvailability('future');
+  },true);
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen)closeData();if(e.key==='Enter'&&e.target.id==='planned-minutes')e.target.blur();});
   // Drag handles work with touch and mouse; prevents accidental scroll only during the drag.
   document.addEventListener('pointerdown',e=>{

@@ -18,19 +18,19 @@
   const sel=q=>root?.querySelector(q);
   const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(config));}catch(e){console.warn(e);}};
   function markup(){return `<div class="metro"><div class="metro-columns"><div class="metro-left">
-    <section class="metro-card"><div class="metro-heading"><h2>テンポ設定</h2><small>30〜300 BPM</small></div><div class="metro-presets">
+    <section class="metro-card"><div class="metro-presets">
     ${abc.map(l=>`<div class="metro-preset tone-${l}"><strong>${l}</strong><div class="metro-adjust"><button data-metro="adjust" data-letter="${l}" data-delta="-1" aria-label="${l}のBPMを下げる">−</button><label><input type="number" data-bpm="${l}" inputmode="numeric" min="30" max="300" aria-label="${l}のBPM"><small>BPM</small></label><button data-metro="adjust" data-letter="${l}" data-delta="1" aria-label="${l}のBPMを上げる">＋</button></div></div>`).join('')}
     </div></section>
-    <section class="metro-card metro-sequence"><div class="metro-heading"><h2>シーケンス</h2><small id="metro-count"></small></div><div class="metro-seq" id="metro-steps"></div><div class="metro-tools"><div>${abc.map(l=>`<button class="metro-add tone-${l}" data-metro="append" data-letter="${l}">＋${l}</button>`).join('')}</div><div><button data-metro="undo" id="metro-undo">↶ 戻す</button><button data-metro="clear" id="metro-clear">全消去</button></div></div></section>
-    </div><section class="metro-card metro-player"><div class="metro-heading"><h2>メトロノーム</h2><span id="metro-status" class="metro-status">停止中</span></div>
+    <section class="metro-card metro-sequence"><div class="metro-seq" id="metro-steps"></div><div class="metro-tools"><div>${abc.map(l=>`<button class="metro-add tone-${l}" data-metro="append" data-letter="${l}">＋${l}</button>`).join('')}</div><div><button data-metro="undo" id="metro-undo">↶ 戻す</button><button data-metro="clear" id="metro-clear">全消去</button></div></div></section>
+    </div><section class="metro-card metro-player"><span id="metro-status" class="metro-status" style="display:none">停止中</span>
       <div class="metro-current"><div><span id="metro-letter">—</span><strong id="metro-bpm">—</strong><small>BPM</small></div><div class="metro-dots" id="metro-dots"><i></i><i></i><i></i><i></i></div></div>
-      <div class="metro-next"><small>NEXT</small><strong id="metro-next">B · 120 BPM</strong><span id="metro-progress">0 / 10</span></div>
+      <div class="metro-next"><small>NEXT</small><strong id="metro-next">B · 120 BPM</strong><span id="metro-progress" style="display:none"></span></div>
       <button class="metro-main" id="metro-advance" data-metro="next"><span><b id="metro-main-text">再生スタート</b><small id="metro-main-sub">B · 120 BPM</small></span><span>▶</span></button>
       <div class="metro-footer"><button id="metro-stop" data-metro="stop">■ 停止・先頭へ</button><button id="metro-sound" data-metro="sound">♫ 音 ON</button></div><span id="metro-announcement" class="sr-only" aria-live="polite"></span>
     </section></div></div>`;}
   function show(){if(!root)return;abc.forEach(l=>{const el=sel(`[data-bpm="${l}"]`);if(el&&document.activeElement!==el)el.value=config.presets[l];});
     const count=config.sequence.length,ni=playing?((index+1)%count):0,nl=count?config.sequence[ni]:null;
-    sel('#metro-count').textContent=`${count} STEPS`;
+
     sel('#metro-steps').innerHTML=count?config.sequence.map((letter,i)=>`<button class="metro-step tone-${letter} ${playing&&i===index?'current':i===ni?'next':''}" data-metro="remove" data-index="${i}" title="${i+1}番目の${letter}を削除"><small>${i+1}</small><strong>${letter}</strong></button>`).join(''):'<span class="metro-empty">—</span>';
     sel('#metro-undo').disabled=!undo.length;sel('#metro-clear').disabled=!count;
     sel('#metro-status').textContent=playing?'再生中':'停止中';sel('#metro-status').classList.toggle('playing',playing);

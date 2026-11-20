@@ -2,7 +2,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js';
 import { getAuth, setPersistence, browserLocalPersistence, onAuthStateChanged,
   signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js';
-import { getDatabase, ref, get, set, onValue } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-database.js';
+import { getDatabase, ref, get, set, onValue, runTransaction } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-database.js';
 
 const BAND='bands/koryosan';
 const root=document.getElementById('app');
@@ -48,10 +48,18 @@ if(!configValid(config)){
         if(my!==session)return;
         if(memberSnap.val()!==true){if(loaded){location.reload();return;}forbidden();return;}
         showAuth('loading','共有データを読み込んでいます…');
-        // 最初に全データを一度だけ取得。初期値が存在しない時は公開データにフォールバックしない。
+        // 最初に共有データを取得。初期例は新しいノードが未登録の場合のみ1回作成。
         const snap=await get(ref(db,BAND));
         if(my!==session)return;
-        const data=snap.val();
+        let data=snap.val();
+        if(data && (!data.schedules || !data.meetings)){
+          // runTransactionで他メンバーの既存データを上書きしない。
+          await seedNewBranches(data);
+          if(my!==session)return;
+          const fresh=await get(ref(db,BAND));
+          if(my!==session)return;
+          data=fresh.val();
+        }
         if(!data?.songs || !data?.songSections){throw Error('Firebaseに曲・歌詞の初期JSONがありません。インポート先 /bands/koryosan を確認してください。');}
         lastRemote=data;
         installDefinitions(data);
@@ -67,6 +75,17 @@ if(!configValid(config)){
   }catch(error){showError(error);}
 }
 
+async function seedNewBranches(existing){
+  const samples={
+    schedules:{'demo-2026-12-17':{category:'practice',date:'2026-12-17',start:'19:00',end:'22:00',place:'新宿NOAH',notes:'・繋ぎとかの練習\n・セトリ通し',createdAt:0},'demo-2026-12-22':{category:'practice',date:'2026-12-22',start:'19:00',end:'22:00',place:'渋谷ペンタシティサイド',notes:'・セトリ集中通し',createdAt:0}},
+    meetings:{'demo-art-photo':{title:'アー写真',createdAt:0,rows:{'demo-n1':{text:'真夏でオワってますが7月末、8月付近に撮れると告知的にベスト、暑さマシな夜とかでもいい',order:0},'demo-n2':{text:'あまりカッコつけすぎると締まった感じにするの難しそうなので、ラフ目な雰囲気でも良い気がしてる',order:1},'demo-n3':{text:'🟢8/16府中で撮影の結論',order:2}}}}
+  };
+  for(const [branch,data] of Object.entries(samples)){
+    if(existing?.[branch]!=null)continue;
+    try{await runTransaction(ref(db,`${BAND}/${branch}`),current=>current===null?data:undefined,{applyLocally:false});}
+    catch(e){console.warn(`初期例 ${branch} は未登録です。Firebaseルールを確認してください。`,e);}
+  }
+}
 function installDefinitions(data){
   const mapped=window.KoryoCloudModel.convert(data);
   window.KORYOSAN_SONGS=mapped.songs;
@@ -77,12 +96,12 @@ function installDefinitions(data){
 function loadApp(){
   return new Promise((resolve,reject)=>{
     const src=document.createElement('script');
-    src.src='./app.js?v=5';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
+    src.src='./app.js?v=6';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
     document.body.append(src);
   });
 }
 function beginWatch(my){
-  const branches=['songs','songSections','setlistExtras','practicePresets','tasks','songNotes','practiceSlots','setlistSlots'];
+  const branches=['songs','songSections','setlistExtras','practicePresets','tasks','songNotes','practiceSlots','setlistSlots','schedules','availability','meetings'];
   for(const branch of branches){
     const off=onValue(ref(db,`${BAND}/${branch}`),snap=>{
       if(my!==session || !lastRemote)return;

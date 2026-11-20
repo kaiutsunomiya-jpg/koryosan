@@ -1,111 +1,82 @@
-# 校了さん Firebase対応版 v5 — 導入手順
+# 校了さん Firebase対応版 v6｜本番更新手順
 
-GitHub Pagesで動く既存の「校了さん」5画面を維持し、Firebase Authentication（メール＋パスワード）による3人限定ログインと、Realtime Databaseによる共有編集へ移行するバージョンです。
+2026-11-20 更新。本パッケージはアップロード済みの `koryosan-main.zip`（Firebase版）を基に、`Koryosan_Test_PWA_GitHubPages(1).zip` の3画面を統合したものです。
 
-**注意：このZIPはFirebaseにまだ接続していません。** `firebase-config.js` にFirebase Consoleで発行された正しいWebアプリ設定を入力して公開後、3人それぞれで動作を確認してください。現在の端末内データを自動的にFirebaseへアップロードすることはありません。
+## 最重要：更新する順番
 
-## 導入前の確認（必須）
+1. **Firebase Realtime Database → データ** でルートJSONをエクスポートしてバックアップする。
+2. **Realtime Database → ルール** で、次節の3つの書き込み権限を既存のルールに追加して「公開」する。
+3. 本ZIPを解凍し、`koryosan-main` フォルダ**内のファイルと `icons` フォルダ**を、GitHub `koryosan` リポジトリのルートへアップロードし、同名ファイルを置き換える（リポジトリ名を変えた場合は対応する名前へ）。
+4. GitHub → ActionsでPagesデプロイの成功を確認し、GitHub Pagesの新しいURLで再読み込みする。
+5. Firebaseに既存データが保存されている状態で、ログイン、3画面、2人同期を確認する。
 
-- Realtime Databaseに既に初期JSONを **`/bands/koryosan`** へインポート済みであること。`songs`（8曲）と`songSections`（ヒートストア15区間）、`songNotes`、`practiceSlots`、`setlistSlots`、`practicePresets`、`setlistExtras`が存在すること。
-- Authentication → Sign-in methodで**メール/パスワード**を有効化し、3人をUsersに作成済みであること。
-- `members`配下に3人のAuth UIDをそれぞれ Boolean値 `true` で登録済みであること。
-- Realtime Database → Rulesに、3人以外の`/bands/koryosan`へのアクセスを拒否し、読み取り専用の曲・歌詞と編集可能なタスク・メモ・スロットを分離したルールを**公開済み**であること。
-- **アップロード前に、現在のv4アプリからJSONバックアップを取得すること。** v5はローカルデータを自動移行・自動上書きしません。Firebaseに登録していない古いタスク・スロット・追記メモは別途整理・移行が必要です。
+**既存の `/bands/koryosan` 全体をJSONインポートで上書きしないでください。** 現在のタスク・曲メモ・セトリなどが消える恐れがあります。この版では、未登録の2領域についてだけアプリが自動でサンプルデータを作成します。
 
-## STEP 1. FirebaseのWebアプリを登録
+## Firebaseルールへの追記（必要）
 
-1. [Firebase Console](https://console.firebase.google.com/) → `koryosan`プロジェクト。
-2. 歯車の **プロジェクトの設定** → **全般** → **マイアプリ**。
-3. Webアプリ（`</>`）がまだなければ「アプリを追加」から登録。ニックネームは `koryosan-web` などでOK。**Firebase Hostingは使わない**ので、Hosting設定は不要。
-4. 「SDK の設定と構成」に表示される`firebaseConfig`を確認します。
-5. `Koryosan_PWA_Firebase_v5/firebase-config.js` をテキストエディタで開き、次の項目を実際の値に置き換えて保存します。
-   - `apiKey` （`PASTE_YOUR_API_KEY`の部分）
-   - `authDomain`（Firebaseに表示された値）
-   - `projectId`（このファイルには `koryosan-222c8` を仮入力済み。必ずConsoleで確認）
-   - `appId` （`PASTE_YOUR_APP_ID`の部分）
-   - `databaseURL`（既に入力してあるURLが実際のRealtime Databaseと一致するか確認）
+Firebase Console → Realtime Database → ルール で、現在のルールの
+`"rules" → "bands" → "koryosan"` の中に、以下の3項目を追加してください。
 
-記入後の形（*以下は例。実際の値ではありません*）：
-
-```js
-window.KORYO_FIREBASE_CONFIG = {
-  apiKey: 'AIz...実際の値',
-  authDomain: '実際のプロジェクトID.firebaseapp.com',
-  databaseURL: 'https://koryosan-222c8-default-rtdb.asia-southeast1.firebasedatabase.app',
-  projectId: '実際のプロジェクトID',
-  appId: '1:123456789:web:xxxxxxx'
-};
+```json
+"schedules": {
+  ".write": "auth != null && root.child('members').child(auth.uid).val() === true"
+},
+"availability": {
+  ".write": "auth != null && root.child('members').child(auth.uid).val() === true"
+},
+"meetings": {
+  ".write": "auth != null && root.child('members').child(auth.uid).val() === true"
+}
 ```
 
-これはWebクライアント設定であり、**パスワードやサービスアカウントの秘密鍵ではありません**。Firebaseの認証・Security Rulesがデータを守ります。**パスワードはソースやGitHubに記載しないでください。**
+これは**差し込む断片**であり、ルール全体を置き換えるJSONではありません。周囲のカンマ位置に注意し、**既存の `members`、`songs`、`songSections`、`songNotes`、`tasks`、`practiceSlots`、`setlistSlots` のルールとその認証条件を残す**こと。読み取りは従来どおり `/bands/koryosan` のメンバー限定 `.read` を継承する想定です。既存ルールが異なる場合は、現在の定義と統合してから公開してください。
 
-## STEP 2. Firebase Authenticationの設定を確認
+追加されるDBノード：
 
-- Authentication → **Sign-in method** → メール/パスワードが有効であることを確認。
-- Authentication → **Users**：メンバー3人分のアカウントとUIDがあることを確認。
-- Authentication → Settings → **Authorized domains**：公開ドメインを求められるフローを使う場合に備え、`kaiutsunomiya-jpg.github.io`を登録します。**`https://` や `/koryosan/` は付けません**。通常のメール/パスワードログインではOAuth型のリダイレクト設定は使いません。
-- 3人がそれぞれ異なる強力なパスワードを使用してください。初回入力後はFirebase Authの`browserLocalPersistence`で、通常の利用では次回以降のログイン状態を保持できます。端末側のサイトデータ消去や明示ログアウト後は再入力が必要です。
+| データ | 保存先 |
+|---|---|
+| 予定・2件のサンプル | `/bands/koryosan/schedules/{scheduleId}` |
+| 各日付・各メンバーの空き | `/bands/koryosan/availability/YYYY-MM-DD/🐧` 等 |
+| 議題と自由記述行 | `/bands/koryosan/meetings/{meetingId}/rows/{rowId}` |
+| 曲メモ欄のタイトル・説明 | `/bands/koryosan/songNotes/{songId}/columns/{columnId}` |
+| コメントレビュー | `/bands/koryosan/songNotes/{songId}/reviews/{columnId}/s01` 等 |
 
-## STEP 3. GitHub Pagesへ公開
+曲詳細メモの説明・レビューは、既存の `songNotes` に保存するため、新しいトップレベルの権限は不要です。
 
-**おすすめ：最初は新規リポジトリ `koryosan-firebase-test` で試験公開し、正常に3人で使えることを確認してから既存の`koryosan`を更新してください。** テスト用でも実データにアクセスできるため、URLの秘密性には頼らずSecurity Rulesで保護してください。
+### 初期サンプルの追加
 
-1. このZIPを解凍し、`firebase-config.js`の設定を終える。
-2. GitHubのリポジトリ → Code → Add file → Upload filesから、解凍フォルダの**中身**をすべてアップロード。
-3. `index.html`がリポジトリ直下にあることを確認し、Commit changes。
-4. Settings → Pages → Deploy from a branch → `main` → `/(root)` → Save。
-5. Actionsで公開が成功したら、Safari/ChromeからURLを開く。
-6. ログイン画面から、登録した3人のうち1人のメールアドレスとパスワードを入力する。
+初めてログインした時に `schedules` または `meetings` がまだ存在しない場合だけ、**既存データを上書きしないトランザクション**で以下を作ります。
 
-**設定されていない場合**、ログイン画面は「FirebaseのWebアプリ設定が未入力」と表示し、曲・歌詞を読み込みません。権限がない場合もアプリ本体は起動しません。エラーが出たら`firebase-config.js`、`members`、Security Rules、インポート先の順に確認してください。
+- 💪練習 2026/12/17 19:00〜22:00 新宿NOAH／繋ぎなどの練習・セトリ通し
+- 💪練習 2026/12/22 19:00〜22:00 渋谷ペンタシティサイド／セトリ集中通し
+- 会議「アー写真」／指定された3つの自由記述欄
 
-## STEP 4. 2人以上で同期確認
+`availability` は空のまま開始します。ルールを更新せずにアクセスするとサンプル作成と新画面の保存が失敗するため、**必ずルール→GitHubの順で更新してください**。
 
-1. 端末Aで🐧のアカウント、端末Bで🦉のアカウントでログイン。
-2. Aで「タスク」を追加し、B側でも表示されることを確認。
-3. Bでそのタスクのステータスを「レビュー依頼」にすると、Aの画面にも反映されることを確認。
-4. Aで曲リスト → ヒートストアの詳細 → 追記メモを変更し、B側でも同じ値が表示されることを確認。
-5. 練習タイテのスロット1の名称、時間、備考を変更して、他の端末に反映されることを確認。
-6. セトリのスロット1で曲を追加・移動し、B側でも同じ順番になることを確認。
-7. 第3のメンバーにもログインしてもらう。
-8. Firebaseのメンバーリストにないアカウントと未ログイン状態では、曲と歌詞を表示できないことを確認。
+## 実装内容
 
-変更時は`onValue`でFirebaseの更新を受け取り、変更したタスク・列・セル・スロット内項目に対するフィールド単位の書き込みを行います。ただし、**同一セルや同じスロットの曲順を同時編集した場合は最終更新により競合する場合があります**。運用開始時は同一項目の同時編集を避けるのがおすすめです。
+### 既存画面
 
-## 重要なセキュリティ・運用上の注意
+- タスク：未設定の空行を＋で先頭追加、アレンジ薄赤／作業緑／未設定白。場所を追加。スマホで備考が空でも横スクロール不要。完了済みは引き続きグレー。
+- 曲リスト：名前順を削除し、Capo順／演奏時間順のみ。モバイル横スクロール抑制。
+- 曲詳細：歌詞ヘッダー、追記列の「列名・説明（リンク欄）・レビュー」。👀はその列のレビュー画面、ゴミ箱は確認後に列を削除。構成と歌詞は2行分結合したヘッダー。レビューコメントもFirebaseで共有。
+- 練習タイテ／セトリ：従来の3スロット、同期機構を保持。
+- メトロノーム：淡い青のUI、説明用見出しを省略、スマホ縦方向を圧縮。音設定は従来同様に端末ローカル。
 
-- **過去に公開したv4の`details.js`や`songs.js`には曲・歌詞が含まれます。** このv5では公開ソースから削除しましたが、**GitHubの旧コミット履歴、過去の公開URL、第三者が取得済みのコピーは消えません。** 非公開化が必要ならGit履歴の整理を別途検討してください。履歴を書き換えても公開済み情報の完全な回収はできません。
-- Realtime Databaseの読み取りは、**ログイン済み・許可済みの3 UIDだけ**をSecurity Rulesで許可します。UIを隠すだけの設計ではありません。
-- Webアプリは現在、**オンライン前提**です。Firebase Web SDKはログアウト/再起動後までの共有データのオフライン永続化を保証しないため、通信がない場合は共有情報を取得できません。旧版のような完全オフライン運用ではありません。
-- Cloud版への移行時にローカル保存`koryosan.app.v1`を**勝手に削除しません**。バックアップ後、アプリの「曲リスト」→保管箱→「旧版データ削除」で削除できます。
-- 曲・歌詞の公開JSに埋め込みをやめ、`songs.js`／`details.js`は公開しても中身を持たない空の受け皿にしました。曲・構成・歌詞はFirebaseからのみ読み込みます。
-- 共有データをローカルストレージに保存せず、並び順・選択中のスロット・完了タスク表示など**個人の画面設定のみ**を`koryosan.preferences.v5`に保存します。メトロノームの設定は従来どおり端末内です。
-- データはRealtime Databaseのロック済み権限のもとで読み書きします。Realtime Databaseの`.validate`ルールなど、データ形式検証を本番運用前に追加してください。
-- 認証トークンを自身で保存したり、他人のアカウントを共有したりしないでください。Firebase設定のクライアント値は秘密鍵ではありませんが、サービスアカウントJSONなどの管理者秘密鍵はGitHubへ絶対アップロードしないでください。
-- Firebaseの利用枠・料金はFirebase Consoleで確認してください。使用量に応じて無料枠の上限に達する可能性があります。
-- **検証範囲**：PC/スマホのブラウザ模擬環境で画面構成、8曲とヒートストア15区間のFirebase JSON変換、タスク・歌詞メモ・練習タイテ・セトリの差分生成をテストしました。**実際のFirebase資格情報によるログインと複数端末での同期は、設定情報がないため未検証**です。
+### 新規画面
 
-## ファイル一覧
+- スケジュール：予定の4カラム＋可変高さの備考、5分刻み時刻、日付カレンダー、種類による全面色分け。＋で白い空行を先頭追加、期限切れは下方にグレー表示、右上の👀で表示切替、削除前確認。
+- 空き日程：今日が先頭、上下に過去／未来を無限に近い形で拡張可能。日付／曜日／🐧🦉🦜、祝日赤字「月祝」等。「今日」ボタン。PC版は中央寄せ・幅縮小。記述欄の外枠を撤去。
+- 会議：濃色タイトル／自由記述複数行、議題・行の追加／確認後削除、個別折りたたみ／一括折りたたみ。
 
-```text
-Koryosan_PWA_Firebase_v5/
-├── index.html                 # 認証ゲートとPWA
-├── firebase-config.js         # ★ここにFirebase Web設定を貼り付ける
-├── firebase-client.js         # Firebase Auth / Realtime DB通信
-├── cloud-model.js             # JSON ⇄ 画面データの変換・差分抽出
-├── firebase-auth.css          # ログイン画面
-├── app.js                     # 5画面・共有編集UI
-├── styles.css                 # PC/スマホ対応
-├── songs.js                   # 公開の曲データなし
-├── details.js                 # 公開の歌詞データなし
-├── metronome.js               # 個人用メトロノーム
-├── sw.js                      # v5オフラインキャッシュ（公開コードのみ）
-├── manifest.webmanifest
-└── icons/                     # 添付アイコン
-```
+すべての共有画面はFirebase Realtime Databaseへ項目単位で差分書き込みします。**ネット接続・認証が必要です。**
 
-関連公式資料：
-- https://firebase.google.com/docs/web/setup
-- https://firebase.google.com/docs/auth/web/auth-state-persistence
-- https://firebase.google.com/docs/database/web/read-and-write
-- https://firebase.google.com/docs/database/security
+## 互換性と注意
+
+- Firebase Webアプリの `firebase-config.js` は、ご提供の本番ZIPにあった設定ファイルをそのまま引き継いでいます。**パスワードは記載されていません。**
+- 曲や歌詞は初期表示時にFirebaseからロードし、公開配信ファイル内には埋め込んでいません。
+- 旧版のバックアップを復元した場合、新しく加えた3画面のデータは維持するようにしています。ただし、復元は他の共有データに影響するため、作業前のバックアップ推奨。
+- 画面はPC 1280px、スマホ390px・320pxで表示・追加・削除・入力をローカル模擬テスト済み。**Firebase実接続でのデプロイ後テストは必要**です。
+- 祝日計算は現行の日本の固定祝日・ハッピーマンデー・振替休日等のルールに基づくローカル計算です。将来の法改正による特例は追加更新が必要です。
+- ホーム画面から開いた際に旧表示のままの場合、アプリを終了してオンラインで再起動するか、新URLを直接開いて再読み込み。Service Workerのキャッシュは `v6` に更新済みです。
+- `README.md` は説明ファイルです。誤ってFirebaseのバックアップJSON、認証パスワード、秘密鍵をGitHubにアップロードしないでください。

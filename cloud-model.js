@@ -42,10 +42,11 @@
  });
  const newSchedules=blob=>Object.entries(sourceObj(blob)).map(([id,x])=>({id,...sourceObj(x)}));
  const newMeetings=blob=>Object.entries(sourceObj(blob)).map(([id,x])=>({...sourceObj(x),id,rows:Object.entries(sourceObj(x.rows)).map(([key,row])=>({id:key,...sourceObj(row)})).sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0))})).sort((a,b)=>(Number(b.createdAt)||0)-(Number(a.createdAt)||0));
+ const accountingArray=blob=>Object.entries(sourceObj(blob)).map(([id,x])=>({id,...sourceObj(x)}));
  const convert=(root)=>{
    const data=sourceObj(root),detailMap=sections(data.songSections);
    return {songs:songs(data.songs),details:detailMap,extras:songs(data.setlistExtras),practice: Object.entries(sourceObj(data.practicePresets)).map(([id,x])=>({id,title:String(x.title),minutes:Number(x.minutes)})),state:{
-       version:10,tasks:taskArray(data.tasks),detailEdits:songNotes(data.songNotes,detailMap),schedules:newSchedules(data.schedules),availability:sourceObj(data.availability),meetings:newMeetings(data.meetings),
+       version:11,accounting:accountingArray(data.accounting),tasks:taskArray(data.tasks),detailEdits:songNotes(data.songNotes,detailMap),schedules:newSchedules(data.schedules),availability:sourceObj(data.availability),meetings:newMeetings(data.meetings),
        setlistSlots:slotArray(data.setlistSlots,'setlist'),practiceSlots:slotArray(data.practiceSlots,'practice')
      }};
  };
@@ -67,6 +68,7 @@
      }
    }
    compareChildren('tasks',byId(previous.tasks),byId(next.tasks));
+   compareChildren('accounting',byId(previous.accounting),byId(next.accounting));
    compareChildren('schedules',byId(previous.schedules),byId(next.schedules));
    // 新規議題は本文行を含む1つのノードとして書き込む。親子への同時setで行が消える競合を防ぐ。
    const priorMeetings=byId(previous.meetings),nextMeetings=byId(next.meetings);

@@ -96,12 +96,12 @@ function installDefinitions(data){
 function loadApp(){
   return new Promise((resolve,reject)=>{
     const src=document.createElement('script');
-    src.src='./app.js?v=10';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
+    src.src='./app.js?v=11';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
     document.body.append(src);
   });
 }
 function beginWatch(my){
-  const branches=['songs','songSections','setlistExtras','practicePresets','tasks','songNotes','practiceSlots','setlistSlots','schedules','availability','meetings'];
+  const branches=['songs','songSections','setlistExtras','practicePresets','tasks','songNotes','practiceSlots','setlistSlots','schedules','availability','meetings','accounting'];
   for(const branch of branches){
     const off=onValue(ref(db,`${BAND}/${branch}`),snap=>{
       if(my!==session || !lastRemote)return;

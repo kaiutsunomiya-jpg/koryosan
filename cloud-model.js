@@ -11,7 +11,7 @@
    }
    return result;
  };
- const songs=blob=>Object.entries(sourceObj(blob)).map(([id,x])=>({id,title:String(x?.title??''),tuning:String(x?.tuning??''),capo:x?.capo??null,durationSeconds:Number(x?.durationSeconds||0),bpm:x?.bpm??null})).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));
+ const songs=blob=>Object.entries(sourceObj(blob)).map(([id,x])=>({id,title:String(x?.title??''),tuning:String(x?.tuning??''),capo:x?.capo??null,durationSeconds:Number(x?.durationSeconds||0),bpm:x?.bpm??null,driveFolderUrl:String(x?.driveFolderUrl||'')})).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));
  const songNotes=(data, details)=>{
    const out={};
    for(const [songId, block] of Object.entries(sourceObj(data))){
@@ -44,7 +44,7 @@
  const convert=(root)=>{
    const data=sourceObj(root),detailMap=sections(data.songSections);
    return {songs:songs(data.songs),details:detailMap,extras:songs(data.setlistExtras),practice: Object.entries(sourceObj(data.practicePresets)).map(([id,x])=>({id,title:String(x.title),minutes:Number(x.minutes)})),state:{
-       version:8,tasks:taskArray(data.tasks),detailEdits:songNotes(data.songNotes,detailMap),schedules:newSchedules(data.schedules),availability:sourceObj(data.availability),meetings:newMeetings(data.meetings),
+       version:9,tasks:taskArray(data.tasks),detailEdits:songNotes(data.songNotes,detailMap),schedules:newSchedules(data.schedules),availability:sourceObj(data.availability),meetings:newMeetings(data.meetings),
        setlistSlots:slotArray(data.setlistSlots,'setlist'),practiceSlots:slotArray(data.practiceSlots,'practice')
      }};
  };

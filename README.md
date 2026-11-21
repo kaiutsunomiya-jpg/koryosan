@@ -1,3 +1,5 @@
+> **v9:** 新機能・更新手順は [CHANGELOG_v9.md](CHANGELOG_v9.md) を参照してください。
+
 # 校了さん v8
 
 更新箇所・Firebaseの互換性・公開方法は同梱の `CHANGELOG_v8.md` を参照してください。

@@ -1,8 +1,8 @@
 'use strict';
-const CACHE = 'koryosan-static-v9';
+const CACHE = 'koryosan-static-v10';
 const ASSETS = [
   './','./index.html','./manifest.webmanifest',
-  './styles.css?v=9','./firebase-auth.css?v=9','./firebase-config.js?v=9','./cloud-model.js?v=9','./firebase-client.js?v=9','./songs.js?v=9','./details.js?v=9','./metronome.js?v=9','./app.js?v=9','./audio-cache.js?v=9',
+  './styles.css?v=10','./firebase-auth.css?v=10','./firebase-config.js?v=10','./cloud-model.js?v=10','./firebase-client.js?v=10','./songs.js?v=10','./details.js?v=10','./metronome.js?v=10','./app.js?v=10',
   './icons/icon-192.png','./icons/icon-512.png','./icons/apple-touch-icon.png'
 ];
 self.addEventListener('install',event=>{

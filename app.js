@@ -48,7 +48,7 @@
   const practiceById=new Map(KORYOSAN_PRACTICE.map(item=>[item.id,item]));
   const newSetlist=i=>({name:`セトリ ${i+1}`,minutes:30,entries:[]});
   const newPractice=i=>({name:`練習 ${i+1}`,minutes:120,startTime:'18:00',endTime:'20:00',entries:[]});
-  const makeState=()=>({version:9,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],
+  const makeState=()=>({version:10,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],
     setlistSlots:Array.from({length:SLOTS},(_,i)=>newSetlist(i)),
     practiceSlots:Array.from({length:SLOTS},(_,i)=>newPractice(i))});
   function validate(raw){
@@ -102,8 +102,9 @@
         const columnIds=Array.isArray(entry.columnIds)&&entry.columnIds.length===headers.length&&entry.columnIds.every(v=>typeof v==='string'&&/^[A-Za-z0-9_-]+$/.test(v)) ? entry.columnIds.slice() : headers.map((_,i)=>`memo${i+1}`);
         const descriptions=columnIds.map((id,i)=>typeof entry.descriptions?.[id]==='string'?entry.descriptions[id].slice(0,2000):typeof entry.descriptions?.[i]==='string'?entry.descriptions[i].slice(0,2000):'');
         const overalls=columnIds.map((id,i)=>typeof entry.overalls?.[id]==='string'?entry.overalls[id].slice(0,5000):'');
+        const filenames=columnIds.map((id,i)=>typeof entry.filenames?.[id]==='string'?entry.filenames[id].slice(0,180):'');
         const reviews={};for(const id of columnIds){const source=entry.reviews?.[id]||{};const rows={};for(const [row,val] of Object.entries(source)){if(/^\d+$/.test(row)&&Number(row)<sections.length&&typeof val==='string')rows[row]=val.slice(0,3000);}reviews[id]=rows;}
-        detailEdits[songId]={columns:headers,columnIds,cells,descriptions:Object.fromEntries(columnIds.map((id,i)=>[id,descriptions[i]])),overalls:Object.fromEntries(columnIds.map((id,i)=>[id,overalls[i]])),reviews,noColumns:headers.length===0};
+        detailEdits[songId]={columns:headers,columnIds,cells,descriptions:Object.fromEntries(columnIds.map((id,i)=>[id,descriptions[i]])),overalls:Object.fromEntries(columnIds.map((id,i)=>[id,overalls[i]])),filenames:Object.fromEntries(columnIds.map((id,i)=>[id,filenames[i]])),reviews,noColumns:headers.length===0};
       }
     }
     // v3で3列目に追記済みの内容と、2列目に置かれていた固定コメントを両方残す。
@@ -154,7 +155,8 @@
     return data;
   }
   let state=read(), page='tasks', detailSong=null, modalOpen=false, taskEditingId=null, dragging=null, availabilityRange=null;
-  const meetingCollapsed=new Set();
+  const meetingCollapsed=new Set(state.meetings.map(m=>m.id));
+  const meetingKnown=new Set(state.meetings.map(m=>m.id));
   const scrollPos={task:0,song:0,detail:0,detailX:0,practiceDraft:0,practiceLibrary:0,setDraft:0,setLibrary:0,schedule:0,meeting:0};
   let lastPublished=clone(state), pendingRemote=null;
   const SAVE_DELAY_MS=600;
@@ -217,7 +219,10 @@
     if(branch==='practiceSlots')state.practiceSlots=validate({...state,practiceSlots:model.state.practiceSlots}).practiceSlots;
     if(branch==='schedules')state.schedules=validate({...state,schedules:model.state.schedules}).schedules;
     if(branch==='availability')state.availability=validate({...state,availability:model.state.availability}).availability;
-    if(branch==='meetings')state.meetings=validate({...state,meetings:model.state.meetings}).meetings;
+    if(branch==='meetings'){
+      state.meetings=validate({...state,meetings:model.state.meetings}).meetings;
+      for(const m of state.meetings){if(!meetingKnown.has(m.id)){meetingKnown.add(m.id);meetingCollapsed.add(m.id);}}
+    }
     // 遠隔の更新は次回差分の基準にも反映し、他人の値を誤って再送信しない。
     lastPublished=clone(state);
     const affectsCurrent =
@@ -295,7 +300,7 @@
       if(!Object.prototype.hasOwnProperty.call(values,0)&&row.note)values[0]=row.note;
       cells[i]=values;
     }
-    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells,descriptions:{...(saved.descriptions||{})},overalls:{...(saved.overalls||{})},reviews:clone(saved.reviews||{}),noColumns:!!saved.noColumns};
+    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells,descriptions:{...(saved.descriptions||{})},overalls:{...(saved.overalls||{})},filenames:{...(saved.filenames||{})},reviews:clone(saved.reviews||{}),noColumns:!!saved.noColumns};
   }
   function safeLinkedUrl(text){
     const match=String(text||'').match(/https?:\/\/[^\s<>"']+/i);
@@ -315,11 +320,15 @@
       return /^[A-Za-z0-9_-]{15,}$/.test(id)?id:'';
     }catch(_){return '';}
   }
-  function audioWidget(text,unique){
+  function audioWidget(text,unique,filename){
     const fileId=driveFileId(text);if(!fileId)return '';
-    const download=`https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
     const preview=`https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`;
-    return `<div class="drive-audio" data-audio-id="${esc(fileId)}" data-audio-unique="${esc(unique)}"><audio controls preload="none" src="${esc(download)}" aria-label="音声再生"></audio><span class="drive-audio-status" aria-live="polite"></span><button type="button" class="drive-preview-toggle" data-action="audio-preview" aria-label="Google Driveプレビューで再生">Driveで再生</button><div class="drive-iframe-holder" hidden><iframe title="Google Drive 音声プレビュー" loading="lazy" referrerpolicy="no-referrer" data-preview-url="${esc(preview)}" allow="autoplay"></iframe><a target="_blank" rel="noopener noreferrer" href="${esc(safeLinkedUrl(text))}">Driveで開く ↗</a></div></div>`;
+    // Google Drive share URLs carry an ID, not the original filename. Allow manual labeling.
+    return `<div class="drive-audio" data-audio-id="${esc(fileId)}">
+      <input type="text" class="drive-file-name" data-detail-filename="${esc(unique)}" maxlength="180" value="${esc(filename||'')}" placeholder="ファイル名を入力（例：デモ.mp3）" aria-label="音声のファイル名">
+      <button type="button" class="drive-preview-toggle" data-action="audio-preview" aria-label="Google Driveで音声を再生">Driveで再生</button>
+      <div class="drive-iframe-holder" hidden><iframe title="Google Drive 音声プレビュー" loading="lazy" referrerpolicy="no-referrer" data-preview-url="${esc(preview)}" allow="autoplay"></iframe><a target="_blank" rel="noopener noreferrer" href="${esc(safeLinkedUrl(text))}">Driveで開く ↗</a></div>
+    </div>`;
   }
   function detailsPage(){
     const song=songById.get(detailSong);if(!song)return songsPage();
@@ -334,24 +343,13 @@
             <span class="detail-fixed-section" role="columnheader">構成</span><span class="detail-fixed-lyrics" role="columnheader">歌詞</span>
             ${extra.columns.map((label,index)=>{const id=extra.columnIds[index],col=index+3,url=safeLinkedUrl(extra.descriptions[id]||''),audio=driveFileId(url);return `
               <div class="detail-memo-title" role="columnheader" style="grid-column:${col};grid-row:1"><input class="detail-col-name-edit" type="text" data-detail-title="${esc(id)}" value="${esc(label)}" maxlength="30" aria-label="追記メモのタイトル"><button type="button" class="detail-memo-delete" data-action="detail-delete-column" data-column="${index}" title="この列を削除" aria-label="${esc(label)}を削除">${ico('trash')}</button></div>
-              <div class="detail-memo-link ${audio?'has-audio':''}" style="grid-column:${col};grid-row:2"><div class="detail-link-entry"><textarea data-detail-desc="${esc(id)}" rows="1" maxlength="2000" aria-label="${esc(label)}の音声・リンク">${esc(extra.descriptions[id]||'')}</textarea><a class="detail-link-open" href="${esc(url||'#')}" target="_blank" rel="noopener noreferrer" ${url?'':'hidden'} title="リンクを開く">↗</a></div><div class="detail-audio-slot">${audio?audioWidget(url,id):''}</div></div>
+              <div class="detail-memo-link ${audio?'has-audio':''}" style="grid-column:${col};grid-row:2"><div class="detail-link-entry"><textarea data-detail-desc="${esc(id)}" rows="1" maxlength="2000" aria-label="${esc(label)}の音声・リンク">${esc(extra.descriptions[id]||'')}</textarea><a class="detail-link-open" href="${esc(url||'#')}" target="_blank" rel="noopener noreferrer" ${url?'':'hidden'} title="リンクを開く">↗</a></div><div class="detail-audio-slot">${audio?audioWidget(url,id,extra.filenames[id]):''}</div></div>
               <textarea class="detail-memo-overall" style="grid-column:${col};grid-row:3" data-detail-overall="${esc(id)}" rows="2" maxlength="5000" aria-label="${esc(label)}の全体メモ">${esc(extra.overalls[id]||'')}</textarea>`;}).join('')}
           </div>
           ${sections.map((row,i)=>`<div class="detail-lyric-row" role="row"><div class="detail-structure" role="cell">${esc(row.section)}</div><div class="detail-lyric-cell" role="cell">${row.lyrics?`<div class="detail-lyric-text">${esc(row.lyrics)}</div>`:''}</div>${extra.columns.map((_,column)=>{const val=extra.cells[i]?.[column]??'',id=extra.columnIds[column];return `<div class="detail-extra-cell detail-extra-inline" role="cell"><textarea class="detail-cell-edit" data-detail-cell="${esc(id)}" data-detail-row="${i}" rows="1" maxlength="5000" aria-label="${esc(row.section)}の追記メモ">${esc(val)}</textarea></div>`;}).join('')}</div>`).join('')}
         </div>
       </div>`:'<div class="detail-placeholder">—</div>'}
     </main>`;
-  }
-  function mountAudioPlayers(){
-    document.querySelectorAll('.drive-audio').forEach(async widget=>{
-      const audio=widget.querySelector('audio'),status=widget.querySelector('.drive-audio-status'),fileId=widget.dataset.audioId;
-      const url=await window.KoryoAudio?.cachedUrl(fileId);
-      if(!widget.isConnected){if(url)URL.revokeObjectURL(url);return;}
-      if(url){audio.src=url;status.textContent='72時間キャッシュを使用';widget.dataset.blobUrl=url;}
-      audio.addEventListener('error',()=>{status.textContent='直接再生できません。Driveで再生をお試しください';const holder=widget.querySelector('.drive-iframe-holder');holder.hidden=false;if(!holder.querySelector('iframe').src)holder.querySelector('iframe').src=holder.querySelector('iframe').dataset.previewUrl;},{once:true});
-      audio.addEventListener('play',()=>{if(widget.dataset.downloadAttempted || widget.dataset.blobUrl)return;widget.dataset.downloadAttempted='1';
-        window.KoryoAudio?.saveFromDrive(fileId).then(ok=>{if(widget.isConnected)status.textContent=ok?'音声を72時間保存しました':'Driveの制約によりキャッシュできません';});});
-    });
   }
   function addDetailColumn(){
     if(page!=='detail'||!detailSong||!KORYOSAN_DETAILS?.[detailSong]?.length)return;
@@ -550,10 +548,9 @@
   }
   function meetingPage(){return `<main class="page-scroll k6-page k6-meeting-page" data-scroll="meeting"><div class="k6-content">${state.meetings.length?state.meetings.map(meetingCard).join(''):'<div class="k6-empty">議題はありません</div>'}</div></main>`;}
 
-  function render(){storeScroll();document.querySelectorAll('.drive-audio[data-blob-url]').forEach(el=>URL.revokeObjectURL(el.dataset.blobUrl));window.KoryoMetronome?.unmount();
+  function render(){storeScroll();window.KoryoMetronome?.unmount();
     $app.innerHTML=`${header()}<div class="app-content">${page==='tasks'?tasksPage():page==='songs'?songsPage():page==='detail'?detailsPage():page==='setlist'?setlistPage():page==='practice'?practicePage():page==='schedule'?schedulePage():page==='availability'?availabilityPage():page==='meeting'?meetingPage():'<div id="metronome-root"></div>'}</div>${tabs()}`;
     restoreScroll();if(page==='availability'){if(!availabilityRange)mountAvailability(localDate());else buildAvailability(availabilityRange.anchor,true);}resizeAutos($app);if(page==='metronome')window.KoryoMetronome?.mount(document.getElementById('metronome-root'));
-    if(page==='detail')mountAudioPlayers();
     document.title=`校了さん${page==='detail'?'｜楽譜・詳細':''}`;
   }
   function updateTime(){
@@ -569,7 +566,7 @@
   function moveEntry(kind,id,targetId){const list=slot(kind).entries;const from=list.findIndex(e=>e.id===id),to=list.findIndex(e=>e.id===targetId);if(from<0||to<0||from===to)return;const [entry]=list.splice(from,1);list.splice(to,0,entry);save();render();}
   function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細、練習タイテ、セトリ、スケジュール、空き日程、会議、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
   function closeData(){modalOpen=false;$modal.innerHTML='';setTimeout(flushRemote,0);}
-  function downloadBackup(){const obj={app:'Koryosan_PWA',version:9,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
+  function downloadBackup(){const obj={app:'Koryosan_PWA',version:10,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
   async function readBackup(file){if(!file)return;if(file.size>8*1024*1024){toast('8MB以下のファイルを指定してください');return;}try{
       const obj=JSON.parse(await file.text());if(obj.app!=='Koryosan_PWA'||!obj.state)throw Error('校了さん用のバックアップを選んでください');
       const nextState=validate(obj.state);
@@ -614,9 +611,9 @@
     if(what==='detail-delete-column'){
       const index=Number(el.dataset.column),data=detailData(detailSong),id=data.columnIds[index];
       if(!id||!confirm(`「${data.columns[index]}」を削除しますか？ この列のメモも削除されます。`))return;
-      data.columns.splice(index,1);data.columnIds.splice(index,1);delete data.descriptions[id];delete data.overalls[id];delete data.reviews[id];
+      data.columns.splice(index,1);data.columnIds.splice(index,1);delete data.descriptions[id];delete data.overalls[id];delete data.filenames[id];delete data.reviews[id];
       for(const row of Object.values(data.cells))row.splice(index,1);
-      if(!data.columns.length){data.noColumns=true;data.cells={};data.descriptions={};data.overalls={};data.reviews={};}
+      if(!data.columns.length){data.noColumns=true;data.cells={};data.descriptions={};data.overalls={};data.filenames={};data.reviews={};}
       state.detailEdits[detailSong]=data;save();render();return;
     }
     if(what==='task-add'){state.tasks.unshift({id:guid(),category:'',name:'',status:'',deadline:localDate(),members:[],notes:'',place:'',createdAt:Date.now()});scrollPos.task=0;save();render();return;}
@@ -629,7 +626,7 @@
     if(what==='schedule-toggle-past'){state.showPastSchedules=!state.showPastSchedules;save();render();return;}
     if(what==='schedule-delete'){if(!confirm('削除しますか？'))return;state.schedules=state.schedules.filter(x=>x.id!==el.dataset.id);save();render();return;}
     if(what==='availability-today'){mountAvailability(localDate());return;}
-    if(what==='meeting-add'){const id=guid(),minCreated=Math.min(Date.now(),...state.meetings.map(m=>m.createdAt||0));state.meetings.push({id,title:'',createdAt:minCreated-1,rows:[{id:guid(),text:''}]});meetingCollapsed.delete(id);scrollPos.meeting=Number.MAX_SAFE_INTEGER;save();render();return;}
+    if(what==='meeting-add'){const id=guid(),minCreated=Math.min(Date.now(),...state.meetings.map(m=>m.createdAt||0));state.meetings.push({id,title:'',createdAt:minCreated-1,rows:[{id:guid(),text:''}]});meetingKnown.add(id);meetingCollapsed.delete(id);scrollPos.meeting=Number.MAX_SAFE_INTEGER;save();render();return;}
     if(what==='meeting-delete'){if(!confirm('削除しますか？'))return;state.meetings=state.meetings.filter(x=>x.id!==el.dataset.id);save();render();return;}
     if(what==='meeting-expand'){meetingCollapsed.has(el.dataset.id)?meetingCollapsed.delete(el.dataset.id):meetingCollapsed.add(el.dataset.id);render();return;}
     if(what==='meeting-toggle-all'){const allOpen=state.meetings.every(x=>!meetingCollapsed.has(x.id));for(const item of state.meetings){if(allOpen)meetingCollapsed.add(item.id);else meetingCollapsed.delete(item.id);}render();return;}
@@ -676,6 +673,11 @@
       if(data.columnIds.includes(id)){data.descriptions[id]=el.value.slice(0,2000);state.detailEdits[detailSong]=data;saveDebounced();resizeOne(el);updateDetailLink(el,id);}
       return;
     }
+    if(el.dataset.detailFilename && detailSong){
+      const data=detailData(detailSong),id=el.dataset.detailFilename;
+      if(data.columnIds.includes(id)){data.filenames[id]=el.value.slice(0,180);state.detailEdits[detailSong]=data;saveDebounced();}
+      return;
+    }
     if(el.dataset.detailOverall && detailSong){
       const data=detailData(detailSong),id=el.dataset.detailOverall;
       if(data.columnIds.includes(id)){data.overalls[id]=el.value.slice(0,5000);state.detailEdits[detailSong]=data;saveDebounced();resizeOne(el);}
@@ -702,7 +704,7 @@
       save();if(['date','category'].includes(k))render();return;
     }
     if(el.dataset.detailDesc){if(dirty)save();render();return;}
-    if(el.dataset.detailOverall||el.dataset.detailCell||el.dataset.detailTitle){if(dirty)save();return;}
+    if(el.dataset.detailOverall||el.dataset.detailCell||el.dataset.detailTitle||el.dataset.detailFilename){if(dirty)save();return;}
     if(el.dataset.select==='entry-minutes'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);const n=Number(el.value);if(entry&&Number.isInteger(n)&&n>=5&&n<=240&&n%5===0){entry.minutes=n;save();updateTime();}return;}
     if(['practice-start','practice-end'].includes(el.id)){
       const n=minutesOf(el.value);if(n===null){el.value=slot('practice')[el.id==='practice-start'?'startTime':'endTime'];return;}

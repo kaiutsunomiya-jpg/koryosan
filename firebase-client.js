@@ -96,7 +96,7 @@ function installDefinitions(data){
 function loadApp(){
   return new Promise((resolve,reject)=>{
     const src=document.createElement('script');
-    src.src='./app.js?v=7';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
+    src.src='./app.js?v=8';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
     document.body.append(src);
   });
 }

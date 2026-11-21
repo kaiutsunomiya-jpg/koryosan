@@ -48,7 +48,7 @@
   const practiceById=new Map(KORYOSAN_PRACTICE.map(item=>[item.id,item]));
   const newSetlist=i=>({name:`セトリ ${i+1}`,minutes:30,entries:[]});
   const newPractice=i=>({name:`練習 ${i+1}`,minutes:120,startTime:'18:00',endTime:'20:00',entries:[]});
-  const makeState=()=>({version:7,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],
+  const makeState=()=>({version:8,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],
     setlistSlots:Array.from({length:SLOTS},(_,i)=>newSetlist(i)),
     practiceSlots:Array.from({length:SLOTS},(_,i)=>newPractice(i))});
   function validate(raw){
@@ -101,8 +101,9 @@
         }
         const columnIds=Array.isArray(entry.columnIds)&&entry.columnIds.length===headers.length&&entry.columnIds.every(v=>typeof v==='string'&&/^[A-Za-z0-9_-]+$/.test(v)) ? entry.columnIds.slice() : headers.map((_,i)=>`memo${i+1}`);
         const descriptions=columnIds.map((id,i)=>typeof entry.descriptions?.[id]==='string'?entry.descriptions[id].slice(0,2000):typeof entry.descriptions?.[i]==='string'?entry.descriptions[i].slice(0,2000):'');
+        const overalls=columnIds.map((id,i)=>typeof entry.overalls?.[id]==='string'?entry.overalls[id].slice(0,5000):'');
         const reviews={};for(const id of columnIds){const source=entry.reviews?.[id]||{};const rows={};for(const [row,val] of Object.entries(source)){if(/^\d+$/.test(row)&&Number(row)<sections.length&&typeof val==='string')rows[row]=val.slice(0,3000);}reviews[id]=rows;}
-        detailEdits[songId]={columns:headers,columnIds,cells,descriptions:Object.fromEntries(columnIds.map((id,i)=>[id,descriptions[i]])),reviews,noColumns:headers.length===0};
+        detailEdits[songId]={columns:headers,columnIds,cells,descriptions:Object.fromEntries(columnIds.map((id,i)=>[id,descriptions[i]])),overalls:Object.fromEntries(columnIds.map((id,i)=>[id,overalls[i]])),reviews,noColumns:headers.length===0};
       }
     }
     // v3で3列目に追記済みの内容と、2列目に置かれていた固定コメントを両方残す。
@@ -156,20 +157,53 @@
   const meetingCollapsed=new Set();
   const scrollPos={task:0,song:0,detail:0,detailX:0,practiceDraft:0,practiceLibrary:0,setDraft:0,setLibrary:0,schedule:0,meeting:0};
   let lastPublished=clone(state), pendingRemote=null;
+  const SAVE_DELAY_MS=600;
+  let saveTimer=null,dirty=false,sending=false,saveFailed=false;
   function persistPrefs(){
     try{localStorage.setItem(PREFS_KEY,JSON.stringify({sort:state.sort,taskSort:state.taskSort,showCompleted:state.showCompleted,showPastSchedules:state.showPastSchedules,activeSetlist:state.activeSetlist,activePractice:state.activePractice}));}
     catch(error){console.warn('設定保存:',error);}
   }
+  // 文字入力は最後のキー操作から600ms後に1回だけ送信する。
+  function saveDebounced(){
+    persistPrefs();dirty=true;
+    clearTimeout(saveTimer);
+    saveTimer=setTimeout(()=>{saveTimer=null;void flushWrites();},SAVE_DELAY_MS);
+  }
+  // ボタン操作や選択確定では、編集中の未送信分を含めてすぐに保存する。
   function save(){
-    // JSON丸ごと上書きしない。差分を小さなDBノード単位で更新する。
-    const next=clone(state),prior=lastPublished;lastPublished=next;
-    persistPrefs();
-    void window.KoryoCloud.publish(prior,next).catch(error=>{console.error('共有保存:',error);toast('共有保存に失敗しました。再読み込みして状態を確認してください');});
+    persistPrefs();dirty=true;
+    clearTimeout(saveTimer);saveTimer=null;
+    void flushWrites();
+  }
+  async function flushWrites(){
+    if(sending||!dirty)return;
+    sending=true;dirty=false;
+    const prior=clone(lastPublished),next=clone(state);
+    let succeeded=false;
+    try{
+      await window.KoryoCloud.publish(prior,next);
+      lastPublished=next;
+      saveFailed=false;
+      succeeded=true;
+    }catch(error){
+      dirty=true;saveFailed=true;
+      console.error('共有保存:',error);
+      toast('共有保存に失敗しました。編集内容は画面に残っています。通信を確認してください');
+    }finally{
+      sending=false;
+      if(succeeded && dirty){
+        clearTimeout(saveTimer);
+        saveTimer=setTimeout(()=>{saveTimer=null;void flushWrites();},SAVE_DELAY_MS);
+      }else if(succeeded){
+        // 受信内容を、保存直後の編集中データに重ねないよう適用を遅延する。
+        setTimeout(flushRemote,0);
+      }
+    }
   }
   function syncError(message){toast(message);}
   function hasActiveEditor(){const active=document.activeElement;return modalOpen || !!(active && ['INPUT','TEXTAREA','SELECT'].includes(active.tagName));}
   function receiveRemote(branch,model){
-    if(hasActiveEditor()) { pendingRemote={...(pendingRemote||{}),[branch]:model};return; }
+    if(hasActiveEditor()||dirty||sending||saveTimer!==null) { pendingRemote={...(pendingRemote||{}),[branch]:model};return; }
     applyRemote(branch,model);
   }
   function applyRemote(branch,model){
@@ -196,7 +230,7 @@
     // 別メンバーがタスクを更新しても、メトロノームを勝手に停止させない。
     if(!modalOpen && affectsCurrent)render();
   }
-  function flushRemote(){if(hasActiveEditor()||!pendingRemote)return;const ready=pendingRemote;pendingRemote=null;for(const [branch,model] of Object.entries(ready))applyRemote(branch,model);}
+  function flushRemote(){if(hasActiveEditor()||dirty||sending||saveTimer!==null||!pendingRemote)return;const ready=pendingRemote;pendingRemote=null;for(const [branch,model] of Object.entries(ready))applyRemote(branch,model);}
   window.KoryoApp={receiveRemote,syncError};
   let toastTimer;
   function toast(message){$toast.textContent=message;$toast.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$toast.classList.remove('show'),3000);}
@@ -252,7 +286,7 @@
     </main>`;
   }
   function detailData(songId){
-    const saved=state.detailEdits[songId]||{columns:[],columnIds:[],cells:{},descriptions:{},reviews:{},noColumns:true};
+    const saved=state.detailEdits[songId]||{columns:[],columnIds:[],cells:{},descriptions:{},overalls:{},reviews:{},noColumns:true};
     const sections=KORYOSAN_DETAILS?.[songId]||[];
     const cells={};
     for(const [i,row] of sections.entries()){
@@ -261,7 +295,17 @@
       if(!Object.prototype.hasOwnProperty.call(values,0)&&row.note)values[0]=row.note;
       cells[i]=values;
     }
-    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells,descriptions:{...(saved.descriptions||{})},reviews:clone(saved.reviews||{}),noColumns:!!saved.noColumns};
+    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells,descriptions:{...(saved.descriptions||{})},overalls:{...(saved.overalls||{})},reviews:clone(saved.reviews||{}),noColumns:!!saved.noColumns};
+  }
+  function safeLinkedUrl(text){
+    const match=String(text||'').match(/https?:\/\/[^\s<>"']+/i);
+    if(!match)return '';
+    try{const url=new URL(match[0]);return ['https:','http:'].includes(url.protocol)?url.href:'';}catch(_){return '';}
+  }
+  function updateDetailLink(el,id){
+    const holder=el.closest('.detail-memo-link');if(!holder)return;
+    const anchor=holder.querySelector('.detail-link-open'),url=safeLinkedUrl(el.value);
+    if(anchor){anchor.hidden=!url;if(url)anchor.href=url;}
   }
   function detailsPage(){
     const song=songById.get(detailSong);if(!song)return songsPage();
@@ -272,9 +316,16 @@
       ${sections.length?`<div class="detail-tools"><button type="button" class="detail-add-column" data-action="detail-add-column" aria-label="追記列を追加" title="追記列を追加" ${cols>=6?'disabled':''}>${ico('plus')}</button></div>
       <div class="detail-lyrics-wrap" role="region" aria-label="${esc(song.title)}の構成・歌詞・追記欄" tabindex="0">
         <div class="detail-lyrics-table ${cols===0?'detail-no-memos':''}" style="--detail-extra-count:${cols}">
-          <div class="detail-lyrics-head detail-header-v6" role="row">
+          <div class="detail-lyrics-head detail-header-v8" role="rowgroup">
             <span class="detail-fixed-section" role="columnheader">構成</span><span class="detail-fixed-lyrics" role="columnheader">歌詞</span>
-            ${extra.columns.map((label,index)=>{const id=extra.columnIds[index];return `<div class="detail-memo-head" role="columnheader"><div class="detail-memo-controls"><button type="button" data-action="detail-delete-column" data-column="${index}" title="この列を削除" aria-label="${esc(label)}を削除">${ico('trash')}</button></div><div class="detail-col-head"><span class="detail-col-name">${esc(label)}</span><button class="detail-rename-button" type="button" data-action="detail-rename-column" data-column="${index}" title="列名を変更" aria-label="${esc(label)}の列名を変更">${ico('edit')}</button></div><textarea data-detail-desc="${esc(id)}" rows="1" maxlength="2000" aria-label="${esc(label)}の説明">${esc(extra.descriptions[id]||'')}</textarea></div>`;}).join('')}
+            ${cols?'<div class="detail-overall-label" role="rowheader">全体</div>':''}
+            ${extra.columns.map((label,index)=>{const id=extra.columnIds[index],col=index+3,url=safeLinkedUrl(extra.descriptions[id]||'');return `
+              <div class="detail-memo-title" role="columnheader" style="grid-column:${col};grid-row:1">
+                <span class="detail-col-name">${esc(label)}</span>
+                <div class="detail-memo-actions"><button class="detail-rename-button" type="button" data-action="detail-rename-column" data-column="${index}" title="列名を変更" aria-label="${esc(label)}の列名を変更">${ico('edit')}</button><button type="button" class="detail-memo-delete" data-action="detail-delete-column" data-column="${index}" title="この列を削除" aria-label="${esc(label)}を削除">${ico('trash')}</button></div>
+              </div>
+              <div class="detail-memo-link" style="grid-column:${col};grid-row:2"><textarea data-detail-desc="${esc(id)}" rows="1" maxlength="2000" aria-label="${esc(label)}のリンク">${esc(extra.descriptions[id]||'')}</textarea><a class="detail-link-open" href="${esc(url||'#')}" target="_blank" rel="noopener noreferrer" ${url?'':'hidden'} aria-label="${esc(label)}のリンクを開く" title="リンクを開く">↗</a></div>
+              <textarea class="detail-memo-overall" style="grid-column:${col};grid-row:3" data-detail-overall="${esc(id)}" rows="2" maxlength="5000" aria-label="${esc(label)}の全体メモ">${esc(extra.overalls[id]||'')}</textarea>`;}).join('')}
           </div>
           ${sections.map((row,i)=>`<div class="detail-lyric-row" role="row"><div class="detail-structure" role="cell">${esc(row.section)}</div><div class="detail-lyric-cell" role="cell">${row.lyrics?`<div class="detail-lyric-text">${esc(row.lyrics)}</div>`:''}</div>${extra.columns.map((_,column)=>{const val=extra.cells[i]?.[column]??'';return `<div class="detail-extra-cell" role="cell"><button type="button" class="detail-edit-button" data-action="detail-edit" data-row="${i}" data-column="${column}" aria-label="${esc(row.section)}、${esc(extra.columns[column])}を編集" title="編集">${ico('edit')}</button>${val?`<div class="detail-extra-content">${esc(val)}</div>`:''}</div>`;}).join('')}</div>`).join('')}
         </div>
@@ -351,11 +402,12 @@
   }
   function tasksPage(){
     const tasks=sortedTasks();
+    const today=localDate();
     return `<main class="page-scroll tasks-page" data-scroll="task">
       <div class="compact-page-heading"><h1>タスク</h1></div>
       <div class="task-sortbar"><div class="sortgroup" role="group" aria-label="タスクの並び替え">${[['deadline','期限順'],['member','担当者順']].map(([k,label])=>`<button data-action="task-sort" data-sort="${k}" aria-pressed="${state.taskSort===k}" class="${state.taskSort===k?'selected':''}">${label}</button>`).join('')}</div></div>
       <div class="tasks-table" role="region" aria-label="タスク一覧"><div class="tasks-grid"><div class="task-table-header" role="row"><span>分類</span><span>タスク名</span><span>ステータス</span><span>期限</span><span>担当</span><span>場所</span><span>備考</span></div>
-      ${tasks.map(task=>`<button class="task-table-row ${task.status==='完了'?'is-done':''} ${task.category==='🎸【アレンジ】'?'task-is-arrange':task.category==='✒️【作業】'?'task-is-work':'task-is-blank'} ${!task.name?'task-is-draft':''}" type="button" role="row" data-action="task-edit" data-id="${esc(task.id)}" aria-label="${esc(task.name)}を編集">
+      ${tasks.map(task=>`<button class="task-table-row ${task.status==='完了'?'is-done':''} ${task.category==='🎸【アレンジ】'?'task-is-arrange':task.category==='✒️【作業】'?'task-is-work':'task-is-blank'} ${!task.name?'task-is-draft':''} ${task.deadline && task.deadline<today?'task-is-overdue':''}" type="button" role="row" data-action="task-edit" data-id="${esc(task.id)}" aria-label="${esc(task.name)}を編集">
         <span class="task-col task-category">${esc(task.category||'')}</span>
         <span class="task-col task-name">${esc(task.name||'')}</span>
         <span class="task-col"><span class="task-status ${taskStatusClass(task.status)}">${esc(task.status||'')}</span></span>
@@ -543,7 +595,7 @@
   function moveEntry(kind,id,targetId){const list=slot(kind).entries;const from=list.findIndex(e=>e.id===id),to=list.findIndex(e=>e.id===targetId);if(from<0||to<0||from===to)return;const [entry]=list.splice(from,1);list.splice(to,0,entry);save();render();}
   function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細、練習タイテ、セトリ、スケジュール、空き日程、会議、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
   function closeData(){modalOpen=false;$modal.innerHTML='';setTimeout(flushRemote,0);}
-  function downloadBackup(){const obj={app:'Koryosan_PWA',version:7,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
+  function downloadBackup(){const obj={app:'Koryosan_PWA',version:8,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
   async function readBackup(file){if(!file)return;if(file.size>8*1024*1024){toast('8MB以下のファイルを指定してください');return;}try{
       const obj=JSON.parse(await file.text());if(obj.app!=='Koryosan_PWA'||!obj.state)throw Error('校了さん用のバックアップを選んでください');
       const nextState=validate(obj.state);
@@ -590,9 +642,9 @@
     if(what==='detail-delete-column'){
       const index=Number(el.dataset.column),data=detailData(detailSong),id=data.columnIds[index];
       if(!id||!confirm(`「${data.columns[index]}」を削除しますか？ この列のメモも削除されます。`))return;
-      data.columns.splice(index,1);data.columnIds.splice(index,1);delete data.descriptions[id];delete data.reviews[id];
+      data.columns.splice(index,1);data.columnIds.splice(index,1);delete data.descriptions[id];delete data.overalls[id];delete data.reviews[id];
       for(const row of Object.values(data.cells))row.splice(index,1);
-      if(!data.columns.length){data.noColumns=true;data.cells={};data.descriptions={};data.reviews={};}
+      if(!data.columns.length){data.noColumns=true;data.cells={};data.descriptions={};data.overalls={};data.reviews={};}
       state.detailEdits[detailSong]=data;save();render();return;
     }
     if(what==='task-add'){state.tasks.unshift({id:guid(),category:'',name:'',status:'',deadline:localDate(),members:[],notes:'',place:'',createdAt:Date.now()});scrollPos.task=0;save();render();return;}
@@ -632,17 +684,27 @@
     const el=e.target;
     if(el.dataset.scheduleField){
       const s=state.schedules.find(x=>x.id===el.closest('[data-schedule-id]')?.dataset.scheduleId);
-      if(s&&['place','notes'].includes(el.dataset.scheduleField)){s[el.dataset.scheduleField]=el.value.slice(0,el.dataset.scheduleField==='notes'?5000:400);save();resizeOne(el);}return;
+      if(s&&['place','notes'].includes(el.dataset.scheduleField)){s[el.dataset.scheduleField]=el.value.slice(0,el.dataset.scheduleField==='notes'?5000:400);saveDebounced();resizeOne(el);}return;
     }
     if(el.dataset.availDay&&TASK_MEMBERS.includes(el.dataset.member)){
       const day=el.dataset.availDay,m=el.dataset.member;
       const row=state.availability[day]||(state.availability[day]={});if(el.value)row[m]=el.value.slice(0,400);else delete row[m];
-      if(!Object.keys(row).length)delete state.availability[day];save();resizeOne(el);return;
+      if(!Object.keys(row).length)delete state.availability[day];saveDebounced();resizeOne(el);return;
     }
-    if(el.dataset.meetingTitle){const m=state.meetings.find(x=>x.id===el.dataset.meetingTitle);if(m){m.title=el.value.slice(0,300);save();}return;}
-    if(el.dataset.meetingRow){const m=state.meetings.find(x=>x.id===el.dataset.meetingRow),r=m?.rows.find(x=>x.id===el.dataset.rowId);if(r){r.text=el.value.slice(0,10000);save();resizeOne(el);}return;}
-    if(el.dataset.input==='note'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);if(entry){entry.note=el.value.slice(0,3000);save();}return;}
-    if(el.id==='planned-minutes'){const num=Number(el.value);if(el.value!==''&&Number.isInteger(num)&&num>=0&&num<=999){slot(page==='practice'?'practice':'setlist').minutes=num;save();updateTime();}}
+    if(el.dataset.meetingTitle){const m=state.meetings.find(x=>x.id===el.dataset.meetingTitle);if(m){m.title=el.value.slice(0,300);saveDebounced();}return;}
+    if(el.dataset.meetingRow){const m=state.meetings.find(x=>x.id===el.dataset.meetingRow),r=m?.rows.find(x=>x.id===el.dataset.rowId);if(r){r.text=el.value.slice(0,10000);saveDebounced();resizeOne(el);}return;}
+    if(el.dataset.detailDesc && detailSong){
+      const data=detailData(detailSong),id=el.dataset.detailDesc;
+      if(data.columnIds.includes(id)){data.descriptions[id]=el.value.slice(0,2000);state.detailEdits[detailSong]=data;saveDebounced();resizeOne(el);updateDetailLink(el,id);}
+      return;
+    }
+    if(el.dataset.detailOverall && detailSong){
+      const data=detailData(detailSong),id=el.dataset.detailOverall;
+      if(data.columnIds.includes(id)){data.overalls[id]=el.value.slice(0,5000);state.detailEdits[detailSong]=data;saveDebounced();resizeOne(el);}
+      return;
+    }
+    if(el.dataset.input==='note'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);if(entry){entry.note=el.value.slice(0,3000);saveDebounced();}return;}
+    if(el.id==='planned-minutes'){const num=Number(el.value);if(el.value!==''&&Number.isInteger(num)&&num>=0&&num<=999){slot(page==='practice'?'practice':'setlist').minutes=num;saveDebounced();updateTime();}}
   });
   document.addEventListener('change',e=>{
     const el=e.target;
@@ -653,7 +715,7 @@
       if((k==='start'||k==='end')&&(el.value===''||minutesOf(el.value)!==null&&minutesOf(el.value)%5===0))s[k]=el.value;
       save();if(['date','category'].includes(k))render();return;
     }
-    if(el.dataset.detailDesc){const data=detailData(detailSong);if(data.columnIds.includes(el.dataset.detailDesc)){data.descriptions[el.dataset.detailDesc]=el.value.slice(0,2000);state.detailEdits[detailSong]=data;save();}return;}
+    if(el.dataset.detailDesc||el.dataset.detailOverall){if(dirty)save();return;}
     if(el.dataset.select==='entry-minutes'){const entry=slot('practice').entries.find(x=>x.id===el.dataset.id);const n=Number(el.value);if(entry&&Number.isInteger(n)&&n>=5&&n<=240&&n%5===0){entry.minutes=n;save();updateTime();}return;}
     if(['practice-start','practice-end'].includes(el.id)){
       const n=minutesOf(el.value);if(n===null){el.value=slot('practice')[el.id==='practice-start'?'startTime':'endTime'];return;}
@@ -662,7 +724,15 @@
     if(el.id==='planned-minutes'){el.value=slot('setlist').minutes;return;}
     if(el.id==='backup-input'){void readBackup(el.files?.[0]);el.value='';}
   });
-  document.addEventListener('focusout',e=>{if(e.target.id==='planned-minutes')e.target.value=slot('setlist').minutes;setTimeout(flushRemote,0);});
+  document.addEventListener('focusout',e=>{
+    if(e.target.id==='planned-minutes')e.target.value=slot('setlist').minutes;
+    if(saveTimer!==null || dirty)save();
+    setTimeout(flushRemote,0);
+  });
+  window.addEventListener('online',()=>{if(saveFailed || dirty)save();});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden' && dirty)save();});
+  window.addEventListener('pagehide',()=>{if(dirty)save();});
+  window.addEventListener('beforeunload',event=>{if((dirty||sending)&&saveFailed){event.preventDefault();event.returnValue='';}});
   document.addEventListener('scroll',e=>{const box=e.target;if(box.id!=='avail-scroll'||!availabilityRange||availabilityRange.expanding)return;
     if(box.scrollTop<170)extendAvailability('past');else if(box.scrollTop+box.clientHeight>box.scrollHeight-450)extendAvailability('future');
   },true);

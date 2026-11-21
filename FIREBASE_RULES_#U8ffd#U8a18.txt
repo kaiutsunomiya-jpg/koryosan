@@ -1,0 +1,15 @@
+Realtime Database → ルール → 既存の "rules" → "bands" → "koryosan" 内に、以下の3つのプロパティを追加する。
+
+"schedules": {
+  ".write": "auth != null && root.child('members').child(auth.uid).val() === true"
+},
+"availability": {
+  ".write": "auth != null && root.child('members').child(auth.uid).val() === true"
+},
+"meetings": {
+  ".write": "auth != null && root.child('members').child(auth.uid).val() === true"
+}
+
+※この断片でルール全体を上書きしないこと。
+※既存のUID・認証ルール、曲/歌詞の書き込み禁止などは残すこと。
+※ルール変更後にGitHub Pagesを更新する。既存DB全体の再インポートは不要。

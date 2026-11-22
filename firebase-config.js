@@ -3,9 +3,9 @@
  * Firebase Authentication → Settings → Authorized domains でGitHub Pagesドメインも確認してください。
  */
 window.KORYO_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyB_Z9JBrD7lugw7kL82XigdUGWBZJXA1tw",
-  authDomain: "koryosan-222c8.firebaseapp.com",
-  databaseURL: "https://koryosan-222c8-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "koryosan-222c8",
-  appId: "1:206163729172:web:16823007e31640a3448001"
+  apiKey: "AIzaSyDsVqImUo3Xig6YidS0D4iK51-qDWS-L6A",
+  authDomain: "koryosan-eba1f.firebaseapp.com",
+  databaseURL: "https://koryosan-eba1f-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "koryosan-eba1f",
+  appId: "1:829703742260:web:2280cdad47777c595abb61"
 };

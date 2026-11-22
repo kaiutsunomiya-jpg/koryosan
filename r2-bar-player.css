@@ -1,0 +1,32 @@
+/* 校了さん v13: MIDI小節指定プレーヤー（さいわいさんと同等の操作系を青系で統一） */
+.k13-r2-open{margin:12px 0 0;display:inline-flex;gap:8px;align-items:center;border:1px solid #bad8e6;background:#e8f4fa;color:#235f7d;border-radius:9px;padding:9px 13px;font-weight:750;font-size:13px;cursor:pointer}
+.k13-r2-open .icon{width:17px;height:17px}
+.k13-modal-open{overflow:hidden}
+.k13-overlay{position:fixed;inset:0;z-index:200;background:#122535c7;display:flex;align-items:center;justify-content:center;padding:12px}
+.k13-dialog{width:min(990px,100%);height:min(94dvh,900px);background:#f7fbfd;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 80px #0007;color:#294759}
+.k13-dialog-head{padding:13px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#dfedf4;border-bottom:1px solid #bfd4e1;flex:none}
+.k13-dialog-head h2{font-size:19px;margin:0 0 3px;line-height:1.2}.k13-dialog-head span{font-size:11px;color:#59798c}
+.k13-close{border:0;border-radius:40px;background:#cbdce7;color:#34556d;font-size:22px;width:35px;height:35px;flex:none;cursor:pointer}
+.k13-body{overflow-y:auto;overscroll-behavior:contain;flex:1;min-height:0}
+.k13-file-row{display:flex;align-items:center;gap:8px;padding:12px 18px 6px}.k13-file-row>span{font-size:11px;color:#547184;white-space:nowrap;font-weight:750}
+.k13-file-row select{min-width:0;flex:1;padding:9px;border:1px solid #cadeeb;border-radius:8px;background:white;color:#2b5068;font-size:12px}.k13-file-row button{padding:8px 12px;border-radius:9px;border:1px solid #c8dce8;background:#fff;color:#316f90}
+.k13-status{margin:0 18px 8px;font-size:11px;color:#5b7f91;line-height:1.5}
+.k13-player{position:sticky;top:0;z-index:5;background:#edf6fb;border-block:1px solid #d5e5ef;padding:14px 18px;box-shadow:0 6px 10px #234c7216}
+.k13-audio-row{display:flex;gap:12px;align-items:center}.k13-play{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:#397eaa;color:white;font-size:19px;cursor:pointer}
+.k13-audio-time{min-width:0;flex:1}.k13-audio-time input,.k13-player input[type=range]{width:100%;min-height:24px;accent-color:#3f86ae;cursor:pointer}
+.k13-timestamps,.k13-bar-ends{display:flex;justify-content:space-between;color:#66899f;font-size:10px;font-variant-numeric:tabular-nums}
+.k13-bar-stats{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:10px 0 4px;color:#53718a;font-size:12px}
+.k13-bar-stats strong{font-size:29px;color:#245b7f;font-variant-numeric:tabular-nums}.k13-bar-stats small{font-size:12px}.k13-bar-stats label{font-size:11px;white-space:nowrap}
+.k13-jump-row{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;margin-top:9px}
+.k13-jumps,.k13-go{display:flex;gap:5px;align-items:center}.k13-jumps button{border:1px solid #c2d8e6;border-radius:7px;background:white;padding:7px 9px;min-width:40px;color:#3278a0;font-weight:750}
+.k13-go label{font-size:11px}.k13-go input{width:68px;border:1px solid #c2d8e6;border-radius:7px;padding:7px;background:white;color:#234e68;text-align:center;font-size:15px}.k13-go button{border:0;background:#377fa7;color:white;border-radius:8px;padding:8px 11px;font-weight:750;font-size:12px}
+.k13-adjust{margin-top:9px;display:flex;gap:8px 20px;align-items:center;flex-wrap:wrap;color:#567d94;font-size:11px}.k13-adjust label{display:flex;align-items:center;gap:5px}.k13-adjust input[type=number]{width:59px;border:1px solid #bdd3e0;border-radius:6px;padding:6px;background:white;color:#31576c}
+.k13-caveat{margin:8px 0 0;color:#688ca0;font-size:10px;line-height:1.6}
+.k13-sections{margin:12px;border:1px solid #d2e2ea;border-radius:9px;overflow:hidden;background:white}
+.k13-sections>header,.k13-section-row{display:grid;grid-template-columns:minmax(100px,25%) minmax(0,1fr)}
+.k13-sections>header{background:#e3f0f7;font-weight:800;color:#346b8c;font-size:12px}.k13-sections>header span{padding:10px 12px}
+.k13-section-row{border-top:1px solid #deebf1;scroll-margin-top:200px}.k13-section-row.active{background:#e8f6fd;box-shadow:inset 3px 0 #4385aa}
+.k13-section-row>div:first-child{display:flex;flex-direction:column;gap:4px;padding:10px;border-right:1px solid #deebf1}.k13-section-row button{border:0;background:transparent;text-align:left;color:#2c6688;font-weight:750;cursor:pointer;font-size:12px}.k13-section-row small{color:#7196aa;font-size:10px}
+.k13-section-row>div:last-child{padding:11px 13px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.65;color:#375b70;min-height:45px}.k13-empty{color:#9eb1bc}
+@media(max-width:699px){.k13-overlay{padding:0}.k13-dialog{height:100dvh;max-height:100dvh;width:100%;border-radius:0}.k13-dialog-head{padding:11px 13px}.k13-dialog-head h2{font-size:17px}.k13-file-row{padding:9px 11px 5px}.k13-file-row>span{display:none}.k13-status{margin:0 11px 7px}.k13-player{padding:10px 12px}.k13-play{width:42px;height:42px}.k13-bar-stats strong{font-size:25px}.k13-jumps button{min-width:34px;padding:7px 6px}.k13-go input{width:54px}.k13-go button{padding:8px}.k13-sections{margin:8px}.k13-sections>header,.k13-section-row{grid-template-columns:96px minmax(0,1fr)}.k13-section-row>div:first-child{padding:9px 7px}.k13-section-row>div:last-child{padding:9px 8px}}
+@media(max-width:359px){.k13-go{width:100%;justify-content:flex-end}.k13-adjust{gap:5px 8px}}

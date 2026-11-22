@@ -50,7 +50,7 @@
   const practiceById=new Map(KORYOSAN_PRACTICE.map(item=>[item.id,item]));
   const newSetlist=i=>({name:`セトリ ${i+1}`,minutes:30,entries:[]});
   const newPractice=i=>({name:`練習 ${i+1}`,minutes:120,startTime:'18:00',endTime:'20:00',entries:[]});
-  const makeState=()=>({version:12,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],accounting:[],
+  const makeState=()=>({version:13,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],accounting:[],
     setlistSlots:Array.from({length:SLOTS},(_,i)=>newSetlist(i)),
     practiceSlots:Array.from({length:SLOTS},(_,i)=>newPractice(i))});
   function validate(raw){
@@ -149,7 +149,7 @@ const accounting=(Array.isArray(raw.accounting)?raw.accounting:[]).slice(0,3000)
   notes:typeof x.notes==='string'?x.notes.slice(0,5000):'',
   createdAt:Number.isFinite(x.createdAt)?x.createdAt:0
 }));
-    return {version:12,detailEdits,tasks,schedules,availability,meetings,accounting,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,showPastSchedules:raw.showPastSchedules!==false,sort:['capo','duration'].includes(raw.sort)?raw.sort:'capo',
+    return {version:13,detailEdits,tasks,schedules,availability,meetings,accounting,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,showPastSchedules:raw.showPastSchedules!==false,sort:['capo','duration'].includes(raw.sort)?raw.sort:'capo',
       activeSetlist:[0,1,2].includes(raw.activeSetlist)?raw.activeSetlist:0,
       activePractice:[0,1,2].includes(raw.activePractice)?raw.activePractice:0,
       setlistSlots:defaults.setlistSlots.map((s,i)=>validSlot(raw.setlistSlots?.[i],s,false)),
@@ -356,7 +356,8 @@ function tabs(){return `<nav class="tabbar" aria-label="画面切り替え">${[
     const sections=KORYOSAN_DETAILS?.[song.id]||[],extra=detailData(song.id),cols=extra.columns.length;
     const folder=safeLinkedUrl(song.driveFolderUrl||'');
     return `<main class="page-scroll details-page" data-scroll="detail">
-      <div class="detail-hero"><div class="detail-heading-row"><h1>${esc(song.title)}</h1>${folder?`<a class="song-folder-link" target="_blank" rel="noopener noreferrer" href="${esc(folder)}" title="曲データのGoogle Driveフォルダへ" aria-label="${esc(song.title)}のGoogle Driveフォルダを開く">${ico('archive')}</a>`:''}</div><div class="detail-metadata"><span>${esc(song.tuning)}</span><span>Capo ${capoText(song)}</span><span>${song.bpm} BPM</span><span>${time(song.durationSeconds)}</span></div></div>
+      <div class="detail-hero"><div class="detail-heading-row"><h1>${esc(song.title)}</h1>${folder?`<a class="song-folder-link" target="_blank" rel="noopener noreferrer" href="${esc(folder)}" title="曲データのGoogle Driveフォルダへ" aria-label="${esc(song.title)}のGoogle Driveフォルダを開く">${ico('archive')}</a>`:''}</div><div class="detail-metadata"><span>${esc(song.tuning)}</span><span>Capo ${capoText(song)}</span><span>${song.bpm} BPM</span><span>${time(song.durationSeconds)}</span></div>
+      ${['ky-05','ky-06','ky-09','ky-10','ky-11','ky-12'].includes(song.id)?`<button class="k13-r2-open" data-action="r2-player" data-song="${esc(song.id)}" aria-label="${esc(song.title)}の音源を開く">${ico('songs')} ${song.id==='ky-05'?'小節指定プレーヤー・音源一覧':'R2音源一覧・再生'}</button>`:''}</div>
       ${sections.length?`<div class="detail-tools"><button type="button" class="detail-add-column" data-action="detail-add-column" aria-label="追記列を追加" title="追記列を追加" ${cols>=6?'disabled':''}>${ico('plus')}</button></div>
       <div class="detail-lyrics-wrap" role="region" aria-label="${esc(song.title)}の構成・歌詞・追記欄" tabindex="0">
         <div class="detail-lyrics-table ${cols===0?'detail-no-memos':''}" style="--detail-extra-count:${cols}">
@@ -698,7 +699,7 @@ function openSearchResult(index){const r=searchResults(searchQuery)[index];if(!r
   function moveEntry(kind,id,targetId){const list=slot(kind).entries;const from=list.findIndex(e=>e.id===id),to=list.findIndex(e=>e.id===targetId);if(from<0||to<0||from===to)return;const [entry]=list.splice(from,1);list.splice(to,0,entry);save();render();}
   function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細、練習タイテ、セトリ、スケジュール、空き日程、会議、会計、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
   function closeData(){modalOpen=false;$modal.innerHTML='';setTimeout(flushRemote,0);}
-  function downloadBackup(){const obj={app:'Koryosan_PWA',version:12,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
+  function downloadBackup(){const obj={app:'Koryosan_PWA',version:13,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
   async function readBackup(file){if(!file)return;if(file.size>8*1024*1024){toast('8MB以下のファイルを指定してください');return;}try{
       const obj=JSON.parse(await file.text());if(obj.app!=='Koryosan_PWA'||!obj.state)throw Error('校了さん用のバックアップを選んでください');
       const nextState=validate(obj.state);
@@ -776,6 +777,11 @@ function openSearchResult(index){const r=searchResults(searchQuery)[index];if(!r
     if(what==='remove'){const kind=el.dataset.kind;const s=slot(kind);s.entries=s.entries.filter(e=>e.id!==el.dataset.id);save();render();return;}
     if(what==='copy-slot'){void copySlot(el.dataset.kind);return;}
     if(what==='detail-toggle-link'){const panel=el.closest('.detail-memo-mp3')?.querySelector('.detail-link-editor');if(panel){panel.hidden=!panel.hidden;el.setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)panel.querySelector('textarea')?.focus();}return;}
+    if(what==='r2-player'){
+      const song=songById.get(el.dataset.song);
+      if(song)void window.KoryoR2Player?.open({song,sections:KORYOSAN_DETAILS?.[song.id]||[],edits:detailData(song.id)});
+      return;
+    }
     if(what==='audio-preview'){const holder=el.closest('.drive-audio')?.querySelector('.drive-iframe-holder');if(holder){holder.hidden=!holder.hidden;const frame=holder.querySelector('iframe');if(!holder.hidden&&!frame.src)frame.src=frame.dataset.previewUrl;}return;}
     if(what==='data'){openData();return;}
     if(what==='close-dialog'){closeData();return;}

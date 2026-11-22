@@ -1,0 +1,16 @@
+Firebase Realtime Database → ルール → rules.bands.koryosan の内部に以下を追記してください。
+（tasks 等と同じ階層です。既存ルール全体を置き換えないでください。）
+
+"accounting": {
+  "$entryId": {
+    ".write": "auth != null && root.child('members').child(auth.uid).val() === true"
+  }
+}
+
+既存の koryosan にログインメンバー向け .read が設定されていれば、読み取り権限の追加は不要です。
+最後に「公開（Publish）」をクリックします。
+
+新たな会計データはアプリから新規行を作成した時点で
+/bands/koryosan/accounting/{行ID}
+に自動登録されます。JSONの手動インポートは不要です。
+上書きインポートは既存データを消すおそれがあるため行わないでください。

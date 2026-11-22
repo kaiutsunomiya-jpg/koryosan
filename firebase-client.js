@@ -1,7 +1,7 @@
 /* Firebaseへの唯一の通信窓口。公開情報はfirebase-config.jsのみ。 */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js';
 import { getAuth, setPersistence, browserLocalPersistence, onAuthStateChanged,
-  signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js';
+  signInWithEmailAndPassword, signOut, getIdToken } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js';
 import { getDatabase, ref, get, set, onValue, runTransaction } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-database.js';
 
 const BAND='bands/koryosan';
@@ -96,7 +96,7 @@ function installDefinitions(data){
 function loadApp(){
   return new Promise((resolve,reject)=>{
     const src=document.createElement('script');
-    src.src='./app.js?v=12';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
+    src.src='./app.js?v=13';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
     document.body.append(src);
   });
 }
@@ -126,7 +126,12 @@ async function publish(before,after){
   if(errors.length)throw Error(`${errors.length}件の保存に失敗しました。ネット接続またはアクセス権を確認してください。`);
 }
 async function logout(){clearSub();if(!auth)return;await signOut(auth);location.reload();}
-window.KoryoCloud={publish,logout};
+async function getAudioToken(){
+  if(!auth?.currentUser)throw Error('Firebaseへのログインが必要です。');
+  return getIdToken(auth.currentUser);
+}
+function getAudioUid(){return auth?.currentUser?.uid || '';}
+window.KoryoCloud={publish,logout,getAudioToken,getAudioUid};
 form.addEventListener('submit',async event=>{
   event.preventDefault();if(!auth)return;
   const button=form.querySelector('button[type="submit"]');

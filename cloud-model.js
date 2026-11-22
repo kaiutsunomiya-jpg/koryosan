@@ -21,6 +21,7 @@
      const descriptions=Object.fromEntries(sorted.map(([id,x])=>[id,String(x?.description||'')]));
      const overalls=Object.fromEntries(sorted.map(([id,x])=>[id,String(x?.overall||'')]));
      const filenames=Object.fromEntries(sorted.map(([id,x])=>[id,String(x?.filename||'')]));
+     const audioKeys=Object.fromEntries(sorted.map(([id,x])=>[id,String(x?.audioKey||'')]));
      const cells={};
      const n=details[songId]?.length||0;
      for(let i=0;i<n;i++){
@@ -29,7 +30,7 @@
        if(vals.some(v=>v))cells[i]=vals;
      }
      const reviews={};for(const id of columnIds){const node=sourceObj(block?.reviews?.[id]),rows={};for(const [key,value] of Object.entries(node)){const match=/^s(\d+)$/.exec(key);if(match&&typeof value==='string')rows[Number(match[1])-1]=value;}reviews[id]=rows;}
-     out[songId]={columns,columnIds,cells,descriptions,overalls,filenames,reviews,noColumns:block?.noColumns===true};
+     out[songId]={columns,columnIds,cells,descriptions,overalls,filenames,audioKeys,reviews,noColumns:block?.noColumns===true};
    }
    return out;
  };
@@ -101,7 +102,7 @@
    for(const songId of new Set([...Object.keys(previous.detailEdits||{}),...Object.keys(next.detailEdits||{})])){
      const o=previous.detailEdits?.[songId]||{columns:[],columnIds:[],cells:{}};
      const n=next.detailEdits?.[songId]||{columns:[],columnIds:[],cells:{}};
-     const cols=entry=>Object.fromEntries((entry.columnIds||[]).map((id,i)=>[id,{title:entry.columns[i],description:entry.descriptions?.[id]||'',overall:entry.overalls?.[id]||'',filename:entry.filenames?.[id]||'',order:i}]));
+     const cols=entry=>Object.fromEntries((entry.columnIds||[]).map((id,i)=>[id,{title:entry.columns[i],description:entry.descriptions?.[id]||'',overall:entry.overalls?.[id]||'',filename:entry.filenames?.[id]||'',audioKey:entry.audioKeys?.[id]||'',order:i}]));
      if((o.columnIds||[]).length===0 !== ((n.columnIds||[]).length===0))put(`songNotes/${songId}/noColumns`,(n.columnIds||[]).length===0?true:null);
      compareChildren(`songNotes/${songId}/columns`,cols(o),cols(n));
      const rowKey=i=>`s${String(Number(i)+1).padStart(2,'0')}`;

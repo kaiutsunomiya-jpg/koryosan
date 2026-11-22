@@ -871,3 +871,50 @@ html {-webkit-text-size-adjust:100%;text-size-adjust:100%;}
   .detail-header-v12 .detail-mp3-name{font-size:11px;}
   .detail-header-v12 .drive-preview-toggle,.detail-header-v12 .detail-mp3-open{font-size:10px;padding:4px 5px;}
 }
+
+/* v14 — zero memo columns must use a valid 2-column grid, not repeat(0,...). */
+.detail-no-memos .detail-lyrics-head,
+.detail-no-memos .detail-lyric-row {
+  display:grid!important;
+  grid-template-columns:var(--detail-structure-width) minmax(0,1fr)!important;
+  width:100%!important;
+  min-width:0!important;
+}
+.detail-no-memos .detail-lyrics-head {grid-template-rows:minmax(42px,auto)!important;}
+.detail-no-memos .detail-fixed-section,
+.detail-no-memos .detail-fixed-lyrics {grid-row:1 / 2!important;}
+.detail-no-memos .detail-fixed-section {grid-column:1!important;}
+.detail-no-memos .detail-fixed-lyrics {grid-column:2!important;}
+.detail-no-memos .detail-lyric-cell{min-width:0;}
+.detail-header-v12 .detail-r2-file-select{
+  display:block;width:100%;min-width:0;max-width:100%;
+  padding:7px 22px 7px 8px;border:0;background:#f7fbfe;
+  color:#285d7e;font-size:12px;font-family:inherit;text-overflow:ellipsis;
+  white-space:nowrap;cursor:pointer;
+}
+.detail-header-v12 .detail-r2-file-select:focus{outline:1px solid #a7cddd;}
+.detail-header-v12 .detail-r2-file-select:disabled{opacity:.45;}
+.detail-header-v12 .detail-column-play{
+  flex:0 0 auto;color:#fff!important;background:#4386ad!important;
+  border-radius:50%!important;width:26px;height:26px;
+  display:inline-grid;place-items:center;font-size:11px;
+  padding:0!important;line-height:1;
+}
+.detail-header-v12 .detail-memo-title{display:flex;align-items:center;}
+.detail-hero .detail-heading-row {justify-content:flex-start;flex-wrap:nowrap;}
+@media(max-width:699px){.detail-header-v12 .detail-r2-file-select{font-size:11px;padding:8px 18px 8px 3px;}}
+/* Empty memo list: two columns should remain compact and aligned. */
+@media(min-width:700px){
+  .detail-no-memos .detail-lyrics-head,
+  .detail-no-memos .detail-lyric-row {grid-template-columns:145px minmax(0,1fr)!important;}
+}
+@media(max-width:699px){
+  .detail-no-memos .detail-lyrics-head,
+  .detail-no-memos .detail-lyric-row {grid-template-columns:74px minmax(0,1fr)!important;}
+}
+@media(max-width:360px){
+  .detail-no-memos .detail-lyrics-head,
+  .detail-no-memos .detail-lyric-row {grid-template-columns:65px minmax(0,1fr)!important;}
+}
+.k13-dialog-head h2 small{font-size:.7em;font-weight:600;color:#5b7c91}
+.k13-status:empty{display:none}

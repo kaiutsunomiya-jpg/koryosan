@@ -1,9 +1,9 @@
 'use strict';
-const CACHE = 'koryosan-static-v13';
+const CACHE = 'koryosan-static-v14';
 const ASSETS = [
   './','./index.html','./manifest.webmanifest',
-  './styles.css?v=13','./firebase-auth.css?v=13','./firebase-config.js?v=13','./cloud-model.js?v=13','./firebase-client.js?v=13','./songs.js?v=13','./details.js?v=13','./metronome.js?v=13','./app.js?v=13',
-  './r2-bar-player.css?v=13','./r2-audio-client.js?v=13','./r2-bar-player.js?v=13','./aoi_mado_bar_map.json','./icons/icon-192.png','./icons/icon-512.png','./icons/apple-touch-icon.png'
+  './styles.css?v=14','./firebase-auth.css?v=14','./firebase-config.js?v=14','./cloud-model.js?v=14','./firebase-client.js?v=14','./songs.js?v=14','./details.js?v=14','./metronome.js?v=14','./app.js?v=14',
+  './r2-bar-player.css?v=14','./r2-audio-client.js?v=14','./r2-bar-player.js?v=14','./icons/icon-192.png','./icons/icon-512.png','./icons/apple-touch-icon.png'
 ];
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));

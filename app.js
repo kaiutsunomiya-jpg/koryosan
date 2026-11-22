@@ -2,6 +2,9 @@
 /* 校了さん：持ち曲は固定、練習タイテとセトリを各3スロットに自動保存。 */
 (() => {
   const PREFS_KEY='koryosan.preferences.v5';
+  const R2_SONG_IDS=new Set(['ky-05','ky-06','ky-09','ky-10','ky-11','ky-12']);
+  const audioListCache=new Map();
+  const audioListPending=new Map();
   const $app=document.getElementById('app');
   const $modal=document.getElementById('modal-root');
   const $toast=document.getElementById('toast');
@@ -50,7 +53,7 @@
   const practiceById=new Map(KORYOSAN_PRACTICE.map(item=>[item.id,item]));
   const newSetlist=i=>({name:`セトリ ${i+1}`,minutes:30,entries:[]});
   const newPractice=i=>({name:`練習 ${i+1}`,minutes:120,startTime:'18:00',endTime:'20:00',entries:[]});
-  const makeState=()=>({version:13,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],accounting:[],
+  const makeState=()=>({version:14,detailEdits:{},sort:'capo',taskSort:'deadline',showCompleted:true,showPastSchedules:true,activeSetlist:0,activePractice:0,tasks:[],schedules:[],availability:{},meetings:[],accounting:[],
     setlistSlots:Array.from({length:SLOTS},(_,i)=>newSetlist(i)),
     practiceSlots:Array.from({length:SLOTS},(_,i)=>newPractice(i))});
   function validate(raw){
@@ -105,8 +108,9 @@
         const descriptions=columnIds.map((id,i)=>typeof entry.descriptions?.[id]==='string'?entry.descriptions[id].slice(0,2000):typeof entry.descriptions?.[i]==='string'?entry.descriptions[i].slice(0,2000):'');
         const overalls=columnIds.map((id,i)=>typeof entry.overalls?.[id]==='string'?entry.overalls[id].slice(0,5000):'');
         const filenames=columnIds.map((id,i)=>typeof entry.filenames?.[id]==='string'?entry.filenames[id].slice(0,180):'');
+        const audioKeys=columnIds.map((id,i)=>typeof entry.audioKeys?.[id]==='string'?entry.audioKeys[id].slice(0,300):'');
         const reviews={};for(const id of columnIds){const source=entry.reviews?.[id]||{};const rows={};for(const [row,val] of Object.entries(source)){if(/^\d+$/.test(row)&&Number(row)<sections.length&&typeof val==='string')rows[row]=val.slice(0,3000);}reviews[id]=rows;}
-        detailEdits[songId]={columns:headers,columnIds,cells,descriptions:Object.fromEntries(columnIds.map((id,i)=>[id,descriptions[i]])),overalls:Object.fromEntries(columnIds.map((id,i)=>[id,overalls[i]])),filenames:Object.fromEntries(columnIds.map((id,i)=>[id,filenames[i]])),reviews,noColumns:headers.length===0};
+        detailEdits[songId]={columns:headers,columnIds,cells,descriptions:Object.fromEntries(columnIds.map((id,i)=>[id,descriptions[i]])),overalls:Object.fromEntries(columnIds.map((id,i)=>[id,overalls[i]])),filenames:Object.fromEntries(columnIds.map((id,i)=>[id,filenames[i]])),audioKeys:Object.fromEntries(columnIds.map((id,i)=>[id,audioKeys[i]])),reviews,noColumns:headers.length===0};
       }
     }
     // v3で3列目に追記済みの内容と、2列目に置かれていた固定コメントを両方残す。
@@ -149,7 +153,7 @@ const accounting=(Array.isArray(raw.accounting)?raw.accounting:[]).slice(0,3000)
   notes:typeof x.notes==='string'?x.notes.slice(0,5000):'',
   createdAt:Number.isFinite(x.createdAt)?x.createdAt:0
 }));
-    return {version:13,detailEdits,tasks,schedules,availability,meetings,accounting,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,showPastSchedules:raw.showPastSchedules!==false,sort:['capo','duration'].includes(raw.sort)?raw.sort:'capo',
+    return {version:14,detailEdits,tasks,schedules,availability,meetings,accounting,taskSort:raw.taskSort==='member'?'member':'deadline',showCompleted:raw.showCompleted!==false,showPastSchedules:raw.showPastSchedules!==false,sort:['capo','duration'].includes(raw.sort)?raw.sort:'capo',
       activeSetlist:[0,1,2].includes(raw.activeSetlist)?raw.activeSetlist:0,
       activePractice:[0,1,2].includes(raw.activePractice)?raw.activePractice:0,
       setlistSlots:defaults.setlistSlots.map((s,i)=>validSlot(raw.setlistSlots?.[i],s,false)),
@@ -312,7 +316,7 @@ function tabs(){return `<nav class="tabbar" aria-label="画面切り替え">${[
     </main>`;
   }
   function detailData(songId){
-    const saved=state.detailEdits[songId]||{columns:[],columnIds:[],cells:{},descriptions:{},overalls:{},reviews:{},noColumns:true};
+    const saved=state.detailEdits[songId]||{columns:[],columnIds:[],cells:{},descriptions:{},overalls:{},audioKeys:{},reviews:{},noColumns:true};
     const sections=KORYOSAN_DETAILS?.[songId]||[];
     const cells={};
     for(const [i,row] of sections.entries()){
@@ -321,7 +325,7 @@ function tabs(){return `<nav class="tabbar" aria-label="画面切り替え">${[
       if(!Object.prototype.hasOwnProperty.call(values,0)&&row.note)values[0]=row.note;
       cells[i]=values;
     }
-    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells,descriptions:{...(saved.descriptions||{})},overalls:{...(saved.overalls||{})},filenames:{...(saved.filenames||{})},reviews:clone(saved.reviews||{}),noColumns:!!saved.noColumns};
+    return {columns:[...saved.columns],columnIds:[...(saved.columnIds||saved.columns.map((_,i)=>`memo${i+1}`))],cells,descriptions:{...(saved.descriptions||{})},overalls:{...(saved.overalls||{})},filenames:{...(saved.filenames||{})},audioKeys:{...(saved.audioKeys||{})},reviews:clone(saved.reviews||{}),noColumns:!!saved.noColumns};
   }
   function safeLinkedUrl(text){
     const match=String(text||'').match(/https?:\/\/[^\s<>"']+/i);
@@ -343,35 +347,45 @@ function tabs(){return `<nav class="tabbar" aria-label="画面切り替え">${[
   }
   // Google Drive preview is loaded only when the member clicks "Driveで再生".
   // The filename is separately editable; Google Drive file IDs do not reveal filenames.
-  function audioWidget(text){
-    const fileId=driveFileId(text);if(!fileId)return '';
-    const preview=`https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`;
-    return `<div class="drive-audio" data-audio-id="${esc(fileId)}">
-      <button type="button" class="drive-preview-toggle" data-action="audio-preview" aria-label="Google Driveで音声を再生">Driveで再生</button>
-      <div class="drive-iframe-holder" hidden><iframe title="Google Drive 音声プレビュー" loading="lazy" referrerpolicy="no-referrer" data-preview-url="${esc(preview)}" allow="autoplay"></iframe><a target="_blank" rel="noopener noreferrer" href="${esc(safeLinkedUrl(text))}">Driveで開く ↗</a></div>
-    </div>`;
+  function r2Options(songId,selectedKey){
+    const cached=audioListCache.get(songId),files=cached?.files||[];
+    let html='<option value="">—</option>';
+    if(selectedKey&&!files.some(f=>f.key===selectedKey))html+=`<option value="${esc(selectedKey)}">${esc(selectedKey.split('/').pop())}</option>`;
+    return html+files.map(file=>`<option value="${esc(file.key)}">${esc(file.name)}</option>`).join('');
+  }
+  function updateAudioSelectors(songId){
+    if(page!=='detail'||detailSong!==songId)return;
+    const data=detailData(songId);
+    for(const select of document.querySelectorAll('select[data-detail-audio-key]')){
+      const id=select.dataset.detailAudioKey,selected=data.audioKeys?.[id]||'';
+      select.innerHTML=r2Options(songId,selected);select.value=selected;
+    }
+  }
+  async function fetchAudioList(songId,force=false){
+    if(!R2_SONG_IDS.has(songId)||!window.KoryoR2Audio)return;
+    const record=audioListCache.get(songId);
+    if(!force&&record&&Date.now()-record.loadedAt<60000){updateAudioSelectors(songId);return;}
+    if(audioListPending.has(songId))return audioListPending.get(songId);
+    const promise=window.KoryoR2Audio.list(songId).then(files=>{
+      audioListCache.set(songId,{files:files.filter(f=>/\.(mp3|wav)$/i.test(f.name||'')&&typeof f.key==='string'),loadedAt:Date.now()});
+      updateAudioSelectors(songId);
+    }).catch(error=>{console.warn('R2音源一覧:',error);if(page==='detail'&&detailSong===songId)toast('音源一覧を取得できませんでした');}).finally(()=>audioListPending.delete(songId));
+    audioListPending.set(songId,promise);return promise;
   }
   function detailsPage(){
     const song=songById.get(detailSong);if(!song)return songsPage();
     const sections=KORYOSAN_DETAILS?.[song.id]||[],extra=detailData(song.id),cols=extra.columns.length;
     const folder=safeLinkedUrl(song.driveFolderUrl||'');
     return `<main class="page-scroll details-page" data-scroll="detail">
-      <div class="detail-hero"><div class="detail-heading-row"><h1>${esc(song.title)}</h1>${folder?`<a class="song-folder-link" target="_blank" rel="noopener noreferrer" href="${esc(folder)}" title="曲データのGoogle Driveフォルダへ" aria-label="${esc(song.title)}のGoogle Driveフォルダを開く">${ico('archive')}</a>`:''}</div><div class="detail-metadata"><span>${esc(song.tuning)}</span><span>Capo ${capoText(song)}</span><span>${song.bpm} BPM</span><span>${time(song.durationSeconds)}</span></div>
-      ${['ky-05','ky-06','ky-09','ky-10','ky-11','ky-12'].includes(song.id)?`<button class="k13-r2-open" data-action="r2-player" data-song="${esc(song.id)}" aria-label="${esc(song.title)}の音源を開く">${ico('songs')} ${song.id==='ky-05'?'小節指定プレーヤー・音源一覧':'R2音源一覧・再生'}</button>`:''}</div>
-      ${sections.length?`<div class="detail-tools"><button type="button" class="detail-add-column" data-action="detail-add-column" aria-label="追記列を追加" title="追記列を追加" ${cols>=6?'disabled':''}>${ico('plus')}</button></div>
+      <div class="detail-hero"><div class="detail-heading-row"><h1>${esc(song.title)}</h1>${folder?`<a class="song-folder-link" target="_blank" rel="noopener noreferrer" href="${esc(folder)}" title="Google Drive" aria-label="${esc(song.title)}のGoogle Driveフォルダを開く">${ico('archive')}</a>`:''}</div><div class="detail-metadata"><span>${esc(song.tuning)}</span><span>Capo ${capoText(song)}</span><span>${song.bpm} BPM</span><span>${time(song.durationSeconds)}</span></div></div>
+      ${sections.length?`<div class="detail-tools">${cols&&R2_SONG_IDS.has(song.id)?`<button type="button" class="detail-add-column" data-action="detail-refresh-audio" title="R2音源一覧を更新" aria-label="R2音源一覧を更新">↻</button>`:''}<button type="button" class="detail-add-column" data-action="detail-add-column" aria-label="追記列を追加" title="追記列を追加" ${cols>=6?'disabled':''}>${ico('plus')}</button></div>
       <div class="detail-lyrics-wrap" role="region" aria-label="${esc(song.title)}の構成・歌詞・追記欄" tabindex="0">
         <div class="detail-lyrics-table ${cols===0?'detail-no-memos':''}" style="--detail-extra-count:${cols}">
           <div class="detail-lyrics-head detail-header-v8 detail-header-v12" role="rowgroup">
             <span class="detail-fixed-section" role="columnheader">構成</span><span class="detail-fixed-lyrics" role="columnheader">歌詞</span>
-            ${extra.columns.map((label,index)=>{const id=extra.columnIds[index],col=index+3,url=safeLinkedUrl(extra.descriptions[id]||''),audio=driveFileId(url);return `
-              <div class="detail-memo-title" role="columnheader" style="grid-column:${col};grid-row:1"><input class="detail-col-name-edit" type="text" data-detail-title="${esc(id)}" value="${esc(label)}" maxlength="80" aria-label="更新内容タイトル" title="更新内容タイトル"><button type="button" class="detail-memo-delete" data-action="detail-delete-column" data-column="${index}" title="この列を削除" aria-label="${esc(label)}を削除">${ico('trash')}</button></div>
-              <div class="detail-memo-mp3" style="grid-column:${col};grid-row:2">
-                <div class="detail-mp3-line"><input type="text" class="detail-mp3-name" data-detail-filename="${esc(id)}" maxlength="180" value="${esc(extra.filenames[id]||'')}" placeholder="MP3名" aria-label="MP3ファイル名">
-                  ${audio?audioWidget(url):url?`<a class="detail-mp3-open" target="_blank" rel="noopener noreferrer" href="${esc(url)}">Driveで開く</a>`:''}
-                  <button type="button" class="detail-link-edit-toggle" data-action="detail-toggle-link" aria-expanded="false" title="Google Driveリンクの編集" aria-label="Google Driveリンクの編集">${ico('archive')}</button>
-                </div>
-                <div class="detail-link-editor" hidden><textarea data-detail-desc="${esc(id)}" rows="2" maxlength="2000" aria-label="MP3のGoogle Drive共有リンク" placeholder="Google Drive共有リンク">${esc(extra.descriptions[id]||'')}</textarea><a class="detail-link-open" href="${esc(url||'#')}" target="_blank" rel="noopener noreferrer" ${url?'':'hidden'} title="リンクを開く">↗</a></div>
-              </div>
+            ${extra.columns.map((label,index)=>{const id=extra.columnIds[index],col=index+3,audioKey=extra.audioKeys?.[id]||'';return `
+              <div class="detail-memo-title" role="columnheader" style="grid-column:${col};grid-row:1"><input class="detail-col-name-edit" type="text" data-detail-title="${esc(id)}" value="${esc(label)}" maxlength="80" aria-label="更新内容タイトル">${audioKey?`<button type="button" class="detail-column-play" data-action="detail-r2-play" data-column-id="${esc(id)}" title="再生" aria-label="${esc(label)}を再生">▶</button>`:''}<button type="button" class="detail-memo-delete" data-action="detail-delete-column" data-column="${index}" title="列を削除" aria-label="${esc(label)}を削除">${ico('trash')}</button></div>
+              <div class="detail-memo-mp3" style="grid-column:${col};grid-row:2"><select class="detail-r2-file-select" data-detail-audio-key="${esc(id)}" aria-label="R2音源を選択" ${R2_SONG_IDS.has(song.id)?'':'disabled'}>${r2Options(song.id,audioKey)}</select></div>
               <textarea class="detail-memo-overall" style="grid-column:${col};grid-row:3" data-detail-overall="${esc(id)}" rows="3" maxlength="5000" aria-label="自由記述">${esc(extra.overalls[id]||'')}</textarea>`;}).join('')}
           </div>
           ${sections.map((row,i)=>`<div class="detail-lyric-row" data-lyric-row="${i}" role="row"><div class="detail-structure" role="cell">${esc(row.section)}</div><div class="detail-lyric-cell" role="cell">${row.lyrics?`<div class="detail-lyric-text">${esc(row.lyrics)}</div>`:''}</div>${extra.columns.map((_,column)=>{const val=extra.cells[i]?.[column]??'',id=extra.columnIds[column];return `<div class="detail-extra-cell detail-extra-inline" role="cell"><textarea class="detail-cell-edit" data-detail-cell="${esc(id)}" data-detail-row="${i}" rows="1" maxlength="5000" aria-label="${esc(row.section)}の追記メモ">${esc(val)}</textarea></div>`;}).join('')}</div>`).join('')}
@@ -682,6 +696,7 @@ function openSearchResult(index){const r=searchResults(searchQuery)[index];if(!r
   function render(){storeScroll();window.KoryoMetronome?.unmount();
     $app.innerHTML=`${header()}<div class="app-content">${page==='tasks'?tasksPage():page==='songs'?songsPage():page==='detail'?detailsPage():page==='setlist'?setlistPage():page==='practice'?practicePage():page==='schedule'?schedulePage():page==='availability'?availabilityPage():page==='meeting'?meetingPage():page==='accounting'?accountingPage():page==='search'?searchPage():'<div id="metronome-root"></div>'}</div>${tabs()}`;
     restoreScroll();if(page==='availability'){if(!availabilityRange)mountAvailability(localDate());else buildAvailability(availabilityRange.anchor,true);}resizeAutos($app);if(page==='metronome')window.KoryoMetronome?.mount(document.getElementById('metronome-root'));
+    if(page==='detail'&&detailSong&&detailData(detailSong).columns.length)void fetchAudioList(detailSong);
     document.title=`校了さん${page==='detail'?'｜楽譜・詳細':''}`;
     if(page==='search'){const input=document.getElementById('global-search');if(input && searchQuery)input.setSelectionRange(searchQuery.length,searchQuery.length);}
     const nav=$app.querySelector('.tabbar'),active=nav?.querySelector('.tab.active');if(nav&&active&&nav.scrollWidth>nav.clientWidth)active.scrollIntoView({block:'nearest',inline:'nearest'});
@@ -699,7 +714,7 @@ function openSearchResult(index){const r=searchResults(searchQuery)[index];if(!r
   function moveEntry(kind,id,targetId){const list=slot(kind).entries;const from=list.findIndex(e=>e.id===id),to=list.findIndex(e=>e.id===targetId);if(from<0||to<0||from===to)return;const [entry]=list.splice(from,1);list.splice(to,0,entry);save();render();}
   function openData(){modalOpen=true;$modal.innerHTML=`<div class="overlay" data-action="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-label="データのバックアップ"><div class="dialog-head"><h2>データのバックアップ</h2><button data-action="close-dialog" aria-label="閉じる">×</button></div><p>タスク、曲詳細、練習タイテ、セトリ、スケジュール、空き日程、会議、会計、メトロノーム設定をまとめて保存・復元できます。</p><div class="dialog-actions"><button data-action="logout" class="logout-action">ログアウト</button><button data-action="clear-legacy" title="旧版端末データを削除">旧版データ削除</button><button data-action="export-data">${ico('archive')} バックアップを保存</button><button data-action="import-data">バックアップを読み込む</button><input type="file" id="backup-input" accept=".json,application/json" hidden></div><p class="fineprint">復元した内容は共有Firebaseへ反映され、他メンバーにも影響します。旧版の端末データは移行されずに保存領域へ残ります。バックアップを取ってから削除してください。</p></section></div>`;}
   function closeData(){modalOpen=false;$modal.innerHTML='';setTimeout(flushRemote,0);}
-  function downloadBackup(){const obj={app:'Koryosan_PWA',version:13,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
+  function downloadBackup(){const obj={app:'Koryosan_PWA',version:14,exportedAt:new Date().toISOString(),state,metronome:window.KoryoMetronome?.snapshot()};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download='koryosan-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('バックアップを保存しました');}
   async function readBackup(file){if(!file)return;if(file.size>8*1024*1024){toast('8MB以下のファイルを指定してください');return;}try{
       const obj=JSON.parse(await file.text());if(obj.app!=='Koryosan_PWA'||!obj.state)throw Error('校了さん用のバックアップを選んでください');
       const nextState=validate(obj.state);
@@ -748,9 +763,9 @@ function openSearchResult(index){const r=searchResults(searchQuery)[index];if(!r
     if(what==='detail-delete-column'){
       const index=Number(el.dataset.column),data=detailData(detailSong),id=data.columnIds[index];
       if(!id||!confirm(`「${data.columns[index]}」を削除しますか？ この列のメモも削除されます。`))return;
-      data.columns.splice(index,1);data.columnIds.splice(index,1);delete data.descriptions[id];delete data.overalls[id];delete data.filenames[id];delete data.reviews[id];
+      data.columns.splice(index,1);data.columnIds.splice(index,1);delete data.descriptions[id];delete data.overalls[id];delete data.filenames[id];delete data.audioKeys[id];delete data.reviews[id];
       for(const row of Object.values(data.cells))row.splice(index,1);
-      if(!data.columns.length){data.noColumns=true;data.cells={};data.descriptions={};data.overalls={};data.filenames={};data.reviews={};}
+      if(!data.columns.length){data.noColumns=true;data.cells={};data.descriptions={};data.overalls={};data.filenames={};data.audioKeys={};data.reviews={};}
       state.detailEdits[detailSong]=data;save();render();return;
     }
     if(what==='task-add'){state.tasks.unshift({id:guid(),category:'',name:'',status:'',deadline:localDate(),members:[],notes:'',place:'',createdAt:Date.now()});scrollPos.task=0;save();render();return;}
@@ -777,9 +792,11 @@ function openSearchResult(index){const r=searchResults(searchQuery)[index];if(!r
     if(what==='remove'){const kind=el.dataset.kind;const s=slot(kind);s.entries=s.entries.filter(e=>e.id!==el.dataset.id);save();render();return;}
     if(what==='copy-slot'){void copySlot(el.dataset.kind);return;}
     if(what==='detail-toggle-link'){const panel=el.closest('.detail-memo-mp3')?.querySelector('.detail-link-editor');if(panel){panel.hidden=!panel.hidden;el.setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)panel.querySelector('textarea')?.focus();}return;}
-    if(what==='r2-player'){
-      const song=songById.get(el.dataset.song);
-      if(song)void window.KoryoR2Player?.open({song,sections:KORYOSAN_DETAILS?.[song.id]||[],edits:detailData(song.id)});
+    if(what==='detail-refresh-audio'){if(detailSong)void fetchAudioList(detailSong,true);return;}
+    if(what==='detail-r2-play'){
+      if(!detailSong)return;
+      const song=songById.get(detailSong),data=detailData(detailSong),id=el.dataset.columnId,key=data.audioKeys[id];
+      if(song&&key)void window.KoryoR2Player?.open({song,sections:KORYOSAN_DETAILS?.[song.id]||[],edits:data,selectedFileKey:key,columnId:id});
       return;
     }
     if(what==='audio-preview'){const holder=el.closest('.drive-audio')?.querySelector('.drive-iframe-holder');if(holder){holder.hidden=!holder.hidden;const frame=holder.querySelector('iframe');if(!holder.hidden&&!frame.src)frame.src=frame.dataset.previewUrl;}return;}
@@ -857,6 +874,12 @@ function openSearchResult(index){const r=searchResults(searchQuery)[index];if(!r
       if(k==='date'&&/^\d{4}-\d{2}-\d{2}$/.test(el.value))s.date=el.value;
       if((k==='start'||k==='end')&&(el.value===''||minutesOf(el.value)!==null&&minutesOf(el.value)%5===0))s[k]=el.value;
       save();if(['date','category'].includes(k))render();return;
+    }
+    if(el.dataset.detailAudioKey && detailSong){
+      const data=detailData(detailSong),id=el.dataset.detailAudioKey,key=el.value;
+      if(!data.columnIds.includes(id))return;
+      const match=audioListCache.get(detailSong)?.files.find(x=>x.key===key);
+      data.audioKeys[id]=key;data.filenames[id]=match?.name||'';state.detailEdits[detailSong]=data;save();render();return;
     }
     if(el.dataset.detailDesc){if(dirty)save();render();return;}
     if(el.dataset.detailOverall||el.dataset.detailCell||el.dataset.detailTitle||el.dataset.detailFilename){if(dirty)save();return;}

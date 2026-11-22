@@ -96,7 +96,7 @@ function installDefinitions(data){
 function loadApp(){
   return new Promise((resolve,reject)=>{
     const src=document.createElement('script');
-    src.src='./app.js?v=13';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
+    src.src='./app.js?v=14';src.onload=resolve;src.onerror=()=>reject(Error('アプリの読み込みに失敗しました。'));
     document.body.append(src);
   });
 }
@@ -126,12 +126,19 @@ async function publish(before,after){
   if(errors.length)throw Error(`${errors.length}件の保存に失敗しました。ネット接続またはアクセス権を確認してください。`);
 }
 async function logout(){clearSub();if(!auth)return;await signOut(auth);location.reload();}
+async function getBarMap(songId){
+  if(!auth?.currentUser||!db||!/^ky-\d{2}$/.test(songId))throw Error('小節データを取得できません');
+  const result=await get(ref(db,`${BAND}/songBarMaps/${songId}`));
+  const map=result.val();
+  if(!map||!Array.isArray(map.bars)||!Array.isArray(map.markers)||map.bars.length<1)return null;
+  return map;
+}
 async function getAudioToken(){
   if(!auth?.currentUser)throw Error('Firebaseへのログインが必要です。');
   return getIdToken(auth.currentUser);
 }
 function getAudioUid(){return auth?.currentUser?.uid || '';}
-window.KoryoCloud={publish,logout,getAudioToken,getAudioUid};
+window.KoryoCloud={publish,logout,getAudioToken,getAudioUid,getBarMap};
 form.addEventListener('submit',async event=>{
   event.preventDefault();if(!auth)return;
   const button=form.querySelector('button[type="submit"]');

@@ -46,7 +46,7 @@
  const convert=(root)=>{
    const data=sourceObj(root),detailMap=sections(data.songSections);
    return {songs:songs(data.songs),details:detailMap,extras:songs(data.setlistExtras),practice: Object.entries(sourceObj(data.practicePresets)).map(([id,x])=>({id,title:String(x.title),minutes:Number(x.minutes)})),state:{
-       version:11,accounting:accountingArray(data.accounting),tasks:taskArray(data.tasks),detailEdits:songNotes(data.songNotes,detailMap),schedules:newSchedules(data.schedules),availability:sourceObj(data.availability),meetings:newMeetings(data.meetings),
+       version:12,accounting:accountingArray(data.accounting),tasks:taskArray(data.tasks),detailEdits:songNotes(data.songNotes,detailMap),schedules:newSchedules(data.schedules),availability:sourceObj(data.availability),meetings:newMeetings(data.meetings),
        setlistSlots:slotArray(data.setlistSlots,'setlist'),practiceSlots:slotArray(data.practiceSlots,'practice')
      }};
  };
